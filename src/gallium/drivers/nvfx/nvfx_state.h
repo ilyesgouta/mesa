@@ -73,5 +73,4 @@ struct nvfx_fragment_program {
 	struct nvfx_fragment_program_bo* fpbo;
 };
 
-
 #endif

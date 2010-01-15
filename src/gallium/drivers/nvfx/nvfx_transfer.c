@@ -60,11 +60,7 @@ nvfx_miptree_transfer_new(struct pipe_context *pipe,
 	struct nvfx_miptree *mt = (struct nvfx_miptree *)pt;
 	struct nvfx_transfer *tx;
 	struct pipe_resource tx_tex_template, *tx_tex;
-	static int no_transfer = -1;
 	unsigned bind = nvfx_transfer_bind_flags(usage);
-	if(no_transfer < 0)
-		no_transfer = debug_get_bool_option("NOUVEAU_NO_TRANSFER", FALSE);
-
 
 	tx = CALLOC_STRUCT(nvfx_transfer);
 	if (!tx)
@@ -76,13 +72,14 @@ nvfx_miptree_transfer_new(struct pipe_context *pipe,
 
 	pipe_resource_reference(&tx->base.resource, pt);
 	tx->base.sr = sr;
+	tx->base.stride = mt->linear_pitch;
+	if(!tx->base.stride)
+		tx->base.stride = util_format_get_stride(pt->format, u_minify(pt->width0, sr.level));
 	tx->base.usage = usage;
 	tx->base.box = *box;
-	tx->base.stride = mt->level[sr.level].pitch;
 
 	/* Direct access to texture */
-	if ((pt->_usage == PIPE_USAGE_DYNAMIC ||
-	     no_transfer) &&
+	if ((util_format_is_s3tc(pt->format) || pt->_usage & PIPE_USAGE_DYNAMIC) &&
 	    pt->flags & NVFX_RESOURCE_FLAG_LINEAR)
 	{
 		tx->direct = true;
@@ -107,7 +104,9 @@ nvfx_miptree_transfer_new(struct pipe_context *pipe,
 		return NULL;
 	}
 
-	tx->base.stride = ((struct nvfx_miptree*)tx_tex)->level[0].pitch;
+	tx->base.stride = ((struct nvfx_miptree*)tx_tex)->linear_pitch;
+	if(!tx->base.stride)
+		tx->base.stride = util_format_get_stride(pt->format, box->width);
 
 	tx->surface = pscreen->get_tex_surface(pscreen, tx_tex,
 	                                       0, 0, 0,
@@ -123,20 +122,16 @@ nvfx_miptree_transfer_new(struct pipe_context *pipe,
 	}
 
 	if (usage & PIPE_TRANSFER_READ) {
-		struct nvfx_screen *nvscreen = nvfx_screen(pscreen);
 		struct pipe_surface *src;
 
 		src = pscreen->get_tex_surface(pscreen, pt,
 	                                       sr.face, sr.level, box->z,
 	                                       PIPE_BIND_BLIT_SOURCE);
 
-		/* TODO: Check if SIFM can deal with x,y,w,h when swizzling */
-		/* TODO: Check if SIFM can un-swizzle */
-		nvscreen->eng2d->copy(nvscreen->eng2d,
-		                      tx->surface, 0, 0,
-		                      src,
-				      box->x, box->y,
-		                      box->width, box->height);
+		pipe->surface_copy(pipe,
+		                  tx->surface, 0, 0,
+		                  src, box->x, box->y,
+		                  box->width, box->height);
 
 		pipe_surface_reference(&src, NULL);
 	}
@@ -152,7 +147,6 @@ nvfx_miptree_transfer_del(struct pipe_context *pipe,
 
 	if (!tx->direct && (ptx->usage & PIPE_TRANSFER_WRITE)) {
 		struct pipe_screen *pscreen = pipe->screen;
-		struct nvfx_screen *nvscreen = nvfx_screen(pscreen);
 		struct pipe_surface *dst;
 
 		dst = pscreen->get_tex_surface(pscreen,
@@ -162,11 +156,10 @@ nvfx_miptree_transfer_del(struct pipe_context *pipe,
 					       ptx->box.z,
 	                                       PIPE_BIND_BLIT_DESTINATION);
 
-		/* TODO: Check if SIFM can deal with x,y,w,h when swizzling */
-		nvscreen->eng2d->copy(nvscreen->eng2d,
-		                      dst, ptx->box.x, ptx->box.y,
-		                      tx->surface, 0, 0,
-		                      ptx->box.width, ptx->box.height);
+		pipe->surface_copy(pipe,
+		                  dst, tx->base.box.x, tx->base.box.y,
+		                  tx->surface, 0, 0,
+		                  tx->base.box.width, tx->base.box.height);
 
 		pipe_surface_reference(&dst, NULL);
 	}
@@ -179,27 +172,26 @@ nvfx_miptree_transfer_del(struct pipe_context *pipe,
 void *
 nvfx_miptree_transfer_map(struct pipe_context *pipe, struct pipe_transfer *ptx)
 {
-	struct pipe_screen *pscreen = pipe->screen;
 	struct nvfx_transfer *tx = (struct nvfx_transfer *)ptx;
-	struct nv04_surface *ns = (struct nv04_surface *)tx->surface;
+	struct nvfx_surface *ns = (struct nvfx_surface *)tx->surface;
 	struct nvfx_miptree *mt = (struct nvfx_miptree *)tx->surface->texture;
-	uint8_t *map = nouveau_screen_bo_map(pscreen, mt->base.bo,
+
+	uint8_t *map = nouveau_screen_bo_map(pipe->screen, mt->base.bo,
 					     nouveau_screen_transfer_flags(ptx->usage));
 
 	if(!tx->direct)
 		return map + ns->base.offset;
 	else
-		return (map + ns->base.offset + 
-			ptx->box.y * ns->pitch + 
-			ptx->box.x * util_format_get_blocksize(ptx->resource->format));
+		return map + ns->base.offset
+		+ util_format_get_2d_size(ns->base.format, ns->pitch, ptx->box.y)
+		+ util_format_get_stride(ptx->resource->format, ptx->box.x);
 }
 
 void
 nvfx_miptree_transfer_unmap(struct pipe_context *pipe, struct pipe_transfer *ptx)
 {
-	struct pipe_screen *pscreen = pipe->screen;
 	struct nvfx_transfer *tx = (struct nvfx_transfer *)ptx;
 	struct nvfx_miptree *mt = (struct nvfx_miptree *)tx->surface->texture;
 
-	nouveau_screen_bo_unmap(pscreen, mt->base.bo);
+	nouveau_screen_bo_unmap(pipe->screen, mt->base.bo);
 }

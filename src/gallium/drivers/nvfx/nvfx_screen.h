@@ -19,7 +19,6 @@ struct nvfx_screen {
 	unsigned index_buffer_reloc_flags;
 
 	/* HW graphics objects */
-	struct nv04_surface_2d *eng2d;
 	struct nouveau_grobj *eng3d;
 	struct nouveau_notifier *sync;
 
@@ -31,6 +30,8 @@ struct nvfx_screen {
 	/* Vtxprog resources */
 	struct nouveau_resource *vp_exec_heap;
 	struct nouveau_resource *vp_data_heap;
+
+	struct nvfx_surface_2d eng2d;
 };
 
 static INLINE struct nvfx_screen *
@@ -38,5 +39,8 @@ nvfx_screen(struct pipe_screen *screen)
 {
 	return (struct nvfx_screen *)screen;
 }
+
+int nvfx_screen_surface_init(struct pipe_screen *pscreen);
+void nvfx_screen_surface_takedown(struct pipe_screen *pscreen);
 
 #endif

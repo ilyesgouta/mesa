@@ -23,15 +23,11 @@ struct nvfx_resource {
 #define NVFX_MAX_TEXTURE_LEVELS  16
 
 struct nvfx_miptree {
-	struct nvfx_resource base;
-	uint total_size;
+        struct nvfx_resource base;
 
-	struct {
-		uint pitch;
-		uint *image_offset;
-	} level[NVFX_MAX_TEXTURE_LEVELS];
-
-	unsigned image_nr;
+        unsigned linear_pitch; /* for linear textures, 0 for swizzled and compressed textures with level-dependent minimal pitch */
+        unsigned face_size; /* 128-byte aligned face/total size */
+        unsigned level_offset[NVFX_MAX_TEXTURE_LEVELS];
 };
 
 static INLINE 

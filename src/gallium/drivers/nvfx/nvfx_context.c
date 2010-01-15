@@ -65,7 +65,7 @@ nvfx_create(struct pipe_screen *pscreen, void *priv)
 	nvfx->is_nv4x = screen->is_nv4x;
 
 	nvfx_init_query_functions(nvfx);
-	nvfx_init_surface_functions(nvfx);
+	nvfx_init_surface_functions(&nvfx->pipe);
 	nvfx_init_state_functions(nvfx);
 	nvfx_init_resource_functions(&nvfx->pipe);
 

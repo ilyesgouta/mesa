@@ -2,8 +2,6 @@
 #include "nvfx_resource.h"
 #include "nouveau/nouveau_util.h"
 
-
-
 void
 nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 {
@@ -29,9 +27,9 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 			colour_format = fb->cbufs[i]->format;
 
 		rt_enable |= (NV34TCL_RT_ENABLE_COLOR0 << i);
-		nvfx->hw_rt[i].bo = nvfx_surface_buffer(fb->cbufs[i]);
+		nvfx->hw_rt[i].bo = ((struct nvfx_miptree*)fb->cbufs[i]->texture)->base.bo;
 		nvfx->hw_rt[i].offset = fb->cbufs[i]->offset;
-		nvfx->hw_rt[i].pitch = ((struct nv04_surface *)fb->cbufs[i])->pitch;
+		nvfx->hw_rt[i].pitch = ((struct nvfx_surface *)fb->cbufs[i])->pitch;
 	}
 	for(; i < 4; ++i)
 		nvfx->hw_rt[i].bo = 0;
@@ -42,9 +40,9 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 
 	if (fb->zsbuf) {
 		zeta_format = fb->zsbuf->format;
-		nvfx->hw_zeta.bo = nvfx_surface_buffer(fb->zsbuf);
+		nvfx->hw_zeta.bo = ((struct nvfx_miptree*)fb->zsbuf->texture)->base.bo;
 		nvfx->hw_zeta.offset = fb->zsbuf->offset;
-		nvfx->hw_zeta.pitch = ((struct nv04_surface *)fb->zsbuf)->pitch;
+		nvfx->hw_zeta.pitch = ((struct nvfx_surface *)fb->zsbuf)->pitch;
 	}
 	else
 		nvfx->hw_zeta.bo = 0;
@@ -67,7 +65,7 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 		depth_only = 1;
 
 		/* Render to depth buffer only */
-		if (!(fb->zsbuf->texture->_usage & NVFX_RESOURCE_FLAG_LINEAR)) {
+		if (!(fb->zsbuf->texture->flags & NVFX_RESOURCE_FLAG_LINEAR)) {
 			assert(!(fb->width & (fb->width - 1)) && !(fb->height & (fb->height - 1)));
 
 			rt_format = NV34TCL_RT_FORMAT_TYPE_SWIZZLED |
