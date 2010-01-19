@@ -77,4 +77,17 @@ RING_3D_NI(unsigned mthd, unsigned size)
 	return 0x40000000 | (7 << 13) | (size << 18) | mthd;
 }
 
+#include <nouveau/nouveau_bo.h>
+
+static inline int
+nouveau_resource_on_gpu(struct pipe_resource* resource)
+{
+#ifdef nouveau_bo_domain
+	return nouveau_bo_domain(nouveau_miptree(src->texture)->bo) & NOUVEAU_BO_VRAM;
+#else
+	/* Can't tell, assume that if we would like it to be in VRAM, it is */
+	return !(resource->_usage & PIPE_USAGE_DYNAMIC);
+#endif
+}
+
 #endif

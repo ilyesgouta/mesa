@@ -79,8 +79,7 @@ nvfx_miptree_transfer_new(struct pipe_context *pipe,
 	tx->base.box = *box;
 
 	/* Direct access to texture */
-	if ((util_format_is_s3tc(pt->format) || pt->_usage & PIPE_USAGE_DYNAMIC) &&
-	    pt->flags & NVFX_RESOURCE_FLAG_LINEAR)
+	if (pt->_usage & PIPE_USAGE_DYNAMIC && pt->flags & NVFX_RESOURCE_FLAG_LINEAR)
 	{
 		tx->direct = true;
 

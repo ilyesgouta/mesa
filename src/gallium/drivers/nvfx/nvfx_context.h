@@ -18,6 +18,7 @@
 #include "nouveau/nouveau_gldefs.h"
 
 #include "nvfx_state.h"
+#include "nvfx_surface.h"
 
 #define NOUVEAU_ERR(fmt, args...) \
 	fprintf(stderr, "%s:%d -  "fmt, __func__, __LINE__, ##args);

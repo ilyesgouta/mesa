@@ -20,6 +20,8 @@ struct nvfx_resource {
 	struct nouveau_bo *bo;
 };
 
+#define NVFX_RESOURCE_FLAG_LINEAR (PIPE_RESOURCE_FLAG_DRV_PRIV << 0)
+
 #define NVFX_MAX_TEXTURE_LEVELS  16
 
 struct nvfx_miptree {
@@ -28,6 +30,11 @@ struct nvfx_miptree {
         unsigned linear_pitch; /* for linear textures, 0 for swizzled and compressed textures with level-dependent minimal pitch */
         unsigned face_size; /* 128-byte aligned face/total size */
         unsigned level_offset[NVFX_MAX_TEXTURE_LEVELS];
+};
+
+struct nvfx_surface {
+	struct pipe_surface base;
+	unsigned pitch;
 };
 
 static INLINE 

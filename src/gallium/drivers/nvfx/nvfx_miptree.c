@@ -7,7 +7,6 @@
 
 #include "nouveau/nouveau_winsys.h"
 #include "nouveau/nouveau_screen.h"
-#include "nv04_surface_2d.h"
 #include "nvfx_resource.h"
 #include "nvfx_transfer.h"
 #include "state_tracker/drm_api.h"

@@ -3,8 +3,9 @@
 
 #include "util/u_double_list.h"
 #include "nouveau/nouveau_screen.h"
-#include "nv04_surface_2d.h"
 #include "nvfx_context.h"
+
+struct nv04_2d_context;
 
 struct nvfx_screen {
 	struct nouveau_screen base;
@@ -31,7 +32,7 @@ struct nvfx_screen {
 	struct nouveau_resource *vp_exec_heap;
 	struct nouveau_resource *vp_data_heap;
 
-	struct nvfx_surface_2d eng2d;
+	struct nv04_2d_context* eng2d;
 };
 
 static INLINE struct nvfx_screen *
