@@ -146,6 +146,24 @@ struct tgsi_declaration_dimension
 #define TGSI_SEMANTIC_INSTANCEID 10
 #define TGSI_SEMANTIC_COUNT      11 /**< number of semantic values */
 
+/* 219 = (14 * 16 - 5)
+ * All SM3 semantics minus COLOR0, COLOR1, POSITION0, FOG0 and PSIZE0
+ * This value is accurately chosen so that Gallium semantic/indices may be converted
+ * losslessly from and to SM3 semantics.
+ *
+ * Note that if BCOLOR is used, then this value is actually 211 - #MAX_BCOLOR_INDEX_USED - 1
+ * (SM3 does not support BCOLOR, and uses FACE instead)
+ *
+ * In any card supports more, this will be handled later.
+ *
+ * However, drivers should support 256 generic indices if the mechanism
+ * they use is not intrinsically limited to a lower value.
+ */
+#define TGSI_SEMANTIC_GENERIC_INDICES 219
+
+#define TGSI_SEMANTIC_INDICES(sem) (((sem) == TGSI_SEMANTIC_GENERIC) ? TGSI_SEMANTIC_GENERIC_INDICES : \
+   ((sem == TGSI_SEMANTIC_COLOR_INDICES || sem == TGSI_SEMANTIC_BCOLOR_INDICES) ? 2 : 1))
+
 struct tgsi_declaration_semantic
 {
    unsigned Name           : 8;  /**< one of TGSI_SEMANTIC_x */
