@@ -411,9 +411,13 @@ nvfx_vp_state_create(struct pipe_context *pipe,
 	struct nvfx_context *nvfx = nvfx_context(pipe);
 	struct nvfx_vertex_program *vp;
 
+	// TODO: use a 64-bit atomic here!
+	static unsigned long long id = 0;
+
 	vp = CALLOC(1, sizeof(struct nvfx_vertex_program));
 	vp->pipe.tokens = tgsi_dup_tokens(cso->tokens);
 	vp->draw = draw_create_vertex_shader(nvfx->draw, &vp->pipe);
+	vp->id = ++id;
 
 	return (void *)vp;
 }

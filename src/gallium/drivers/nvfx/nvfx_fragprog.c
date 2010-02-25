@@ -1,6 +1,7 @@
 #include "pipe/p_context.h"
 #include "pipe/p_defines.h"
 #include "pipe/p_state.h"
+#include "util/u_semantics.h"
 #include "util/u_inlines.h"
 
 #include "pipe/p_shader_tokens.h"
@@ -15,8 +16,6 @@
 #define MAX_IMM 32
 struct nvfx_fpc {
 	struct nvfx_fragment_program *fp;
-
-	uint attrib_map[PIPE_MAX_SHADER_INPUTS];
 
 	unsigned r_temps;
 	unsigned r_temps_discard;
@@ -36,6 +35,8 @@ struct nvfx_fpc {
 
 	struct nvfx_sreg imm[MAX_IMM];
 	unsigned nr_imm;
+
+	unsigned char sem_table[256]; /* semantic idx for each input semantic */
 };
 
 static INLINE struct nvfx_sreg
@@ -110,6 +111,11 @@ emit_src(struct nvfx_fpc *fpc, int pos, struct nvfx_sreg src)
 	case NVFXSR_TEMP:
 		sr |= (NVFX_FP_REG_TYPE_TEMP << NVFX_FP_REG_TYPE_SHIFT);
 		sr |= (src.index << NVFX_FP_REG_SRC_SHIFT);
+		break;
+	case NVFXSR_RELOCATED:
+		sr |= (NVFX_FP_REG_TYPE_INPUT << NVFX_FP_REG_TYPE_SHIFT);
+		printf("adding relocation at %x for %x\n", fpc->inst_offset, src.index);
+		util_dynarray_append(&fpc->fp->sem_relocs[src.index], unsigned, fpc->inst_offset);
 		break;
 	case NVFXSR_CONST:
 		if (!fpc->have_const) {
@@ -241,8 +247,28 @@ tgsi_src(struct nvfx_fpc *fpc, const struct tgsi_full_src_register *fsrc)
 
 	switch (fsrc->Register.File) {
 	case TGSI_FILE_INPUT:
-		src = nvfx_sr(NVFXSR_INPUT,
-			      fpc->attrib_map[fsrc->Register.Index]);
+		if(fpc->fp->info.input_semantic_name[fsrc->Register.Index] == TGSI_SEMANTIC_POSITION) {
+			assert(fpc->fp->info.input_semantic_index[fsrc->Register.Index] == 0);
+			src = nvfx_sr(NVFXSR_INPUT, NVFX_FP_OP_INPUT_SRC_POSITION);
+		} else if(fpc->fp->info.input_semantic_name[fsrc->Register.Index] == TGSI_SEMANTIC_COLOR) {
+			if(fpc->fp->info.input_semantic_index[fsrc->Register.Index] == 0)
+				src = nvfx_sr(NVFXSR_INPUT, NVFX_FP_OP_INPUT_SRC_COL0);
+			else if(fpc->fp->info.input_semantic_index[fsrc->Register.Index] == 1)
+				src = nvfx_sr(NVFXSR_INPUT, NVFX_FP_OP_INPUT_SRC_COL1);
+			else
+				assert(0);
+		} else if(fpc->fp->info.input_semantic_name[fsrc->Register.Index] == TGSI_SEMANTIC_FOG) {
+			assert(fpc->fp->info.input_semantic_index[fsrc->Register.Index] == 0);
+			src = nvfx_sr(NVFXSR_INPUT, NVFX_FP_OP_INPUT_SRC_FOGC);
+		} else if(fpc->fp->info.input_semantic_name[fsrc->Register.Index] == TGSI_SEMANTIC_FACE) {
+			/* TODO: check this has the correct values */
+			/* XXX: what do we do for nv30 here (assuming it lacks facing)?!  */
+			assert(fpc->fp->info.input_semantic_index[fsrc->Register.Index] == 0);
+			src = nvfx_sr(NVFXSR_INPUT, NV40_FP_OP_INPUT_SRC_FACING);
+		} else {
+			assert(fpc->fp->info.input_semantic_name[fsrc->Register.Index] == TGSI_SEMANTIC_GENERIC);
+			src = nvfx_sr(NVFXSR_RELOCATED, fpc->sem_table[fpc->fp->info.input_semantic_index[fsrc->Register.Index]]);
+		}
 		break;
 	case TGSI_FILE_CONSTANT:
 		src = constant(fpc, fsrc->Register.Index, NULL);
@@ -611,48 +637,6 @@ nvfx_fragprog_parse_instruction(struct nvfx_context* nvfx, struct nvfx_fpc *fpc,
 }
 
 static boolean
-nvfx_fragprog_parse_decl_attrib(struct nvfx_context* nvfx, struct nvfx_fpc *fpc,
-				const struct tgsi_full_declaration *fdec)
-{
-	int hw;
-
-	switch (fdec->Semantic.Name) {
-	case TGSI_SEMANTIC_POSITION:
-		hw = NVFX_FP_OP_INPUT_SRC_POSITION;
-		break;
-	case TGSI_SEMANTIC_COLOR:
-		if (fdec->Semantic.Index == 0) {
-			hw = NVFX_FP_OP_INPUT_SRC_COL0;
-		} else
-		if (fdec->Semantic.Index == 1) {
-			hw = NVFX_FP_OP_INPUT_SRC_COL1;
-		} else {
-			NOUVEAU_ERR("bad colour semantic index\n");
-			return FALSE;
-		}
-		break;
-	case TGSI_SEMANTIC_FOG:
-		hw = NVFX_FP_OP_INPUT_SRC_FOGC;
-		break;
-	case TGSI_SEMANTIC_GENERIC:
-		if (fdec->Semantic.Index <= 7) {
-			hw = NVFX_FP_OP_INPUT_SRC_TC(fdec->Semantic.
-						     Index);
-		} else {
-			NOUVEAU_ERR("bad generic semantic index\n");
-			return FALSE;
-		}
-		break;
-	default:
-		NOUVEAU_ERR("bad input semantic\n");
-		return FALSE;
-	}
-
-	fpc->attrib_map[fdec->Range.First] = hw;
-	return TRUE;
-}
-
-static boolean
 nvfx_fragprog_parse_decl_output(struct nvfx_context* nvfx, struct nvfx_fpc *fpc,
 				const struct tgsi_full_declaration *fdec)
 {
@@ -691,6 +675,15 @@ nvfx_fragprog_prepare(struct nvfx_context* nvfx, struct nvfx_fpc *fpc)
 {
 	struct tgsi_parse_context p;
 	int high_temp = -1, i;
+	struct util_semantic_set set;
+
+	fpc->fp->num_semantics = util_semantic_set_from_program_file(&set, fpc->fp->pipe.tokens, TGSI_FILE_INPUT);
+	if(fpc->fp->num_semantics > 8)
+		return FALSE;
+	util_semantic_layout_from_set(fpc->fp->semantics, &set, 0, 8);
+	util_semantic_table_from_layout(fpc->sem_table, fpc->fp->semantics, 0, 8);
+
+	memset(fpc->fp->cur_slots, 0xff, sizeof(fpc->fp->cur_slots));
 
 	tgsi_parse_init(&p, fpc->fp->pipe.tokens);
 	while (!tgsi_parse_end_of_tokens(&p)) {
@@ -703,10 +696,6 @@ nvfx_fragprog_prepare(struct nvfx_context* nvfx, struct nvfx_fpc *fpc)
 			const struct tgsi_full_declaration *fdec;
 			fdec = &p.FullToken.FullDeclaration;
 			switch (fdec->Declaration.File) {
-			case TGSI_FILE_INPUT:
-				if (!nvfx_fragprog_parse_decl_attrib(nvfx, fpc, fdec))
-					goto out_err;
-				break;
 			case TGSI_FILE_OUTPUT:
 				if (!nvfx_fragprog_parse_decl_output(nvfx, fpc, fdec))
 					goto out_err;
@@ -878,6 +867,31 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 	if (nvfx->dirty & NVFX_NEW_FRAGCONST)
 		update = TRUE;
 
+	struct nvfx_vertex_program* vp = nvfx->render_mode == HW ? nvfx->vertprog : nvfx->swtnl.vertprog;
+	if (fp->last_vp_id != vp->id) {
+		char* vp_sem_table = vp->sem_table;
+		unsigned char* fp_semantics = fp->semantics;
+		unsigned diff = 0;
+		fp->last_vp_id = nvfx->vertprog->id;
+		unsigned char* cur_slots = fp->cur_slots;
+		for(unsigned i = 0; i < fp->num_semantics; ++i) {
+			unsigned char slot_mask = vp_sem_table[fp_semantics[i]];
+			diff |= (slot_mask >> 4) & (slot_mask ^ cur_slots[i]);
+		}
+
+		if(diff)
+		{
+			fp->cur_slots_progs_left = fp->progs;
+			for(unsigned i = 0; i < fp->num_semantics; ++i) {
+				/* if 0xff, then this will write to the dummy value at fp->last_layout_mask[0] */
+				fp->cur_slots[i] = vp_sem_table[fp_semantics[i]] & 0xf;
+				printf("fp: GENERIC[%i] from fpreg %i\n", fp_semantics[i], fp->cur_slots[i]);
+			}
+
+			update = TRUE;
+		}
+	}
+
 	if(update) {
 		++fp->bo_prog_idx;
 		if(fp->bo_prog_idx >= fp->progs_per_bo)
@@ -888,7 +902,9 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 			}
 			else
 			{
-				struct nvfx_fragment_program_bo* fpbo = os_malloc_aligned(sizeof(struct nvfx_fragment_program) + fp->prog_size * fp->progs_per_bo, 16);
+				struct nvfx_fragment_program_bo* fpbo = os_malloc_aligned(sizeof(struct nvfx_fragment_program) + (fp->prog_size + 8) * fp->progs_per_bo, 16);
+				fpbo->slots = &fpbo->insn[(fp->prog_size) * fp->progs_per_bo];
+				memset(fpbo->slots, 0, 8 * fp->progs_per_bo);
 				if(fp->fpbo)
 				{
 					fpbo->next = fp->fpbo->next;
@@ -898,6 +914,8 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 					fpbo->next = fpbo;
 				fp->fpbo = fpbo;
 				fpbo->bo = 0;
+				fp->progs += fp->progs_per_bo;
+				fp->cur_slots_progs_left += fp->progs_per_bo;
 				nouveau_bo_new(nvfx->screen->base.device, NOUVEAU_BO_VRAM | NOUVEAU_BO_MAP, 64, fp->prog_size * fp->progs_per_bo, &fpbo->bo);
 				nouveau_bo_map(fpbo->bo, NOUVEAU_BO_NOSYNC);
 
@@ -915,6 +933,7 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 		}
 
 		int offset = fp->bo_prog_idx * fp->prog_size;
+		uint32_t* fpmap = (uint32_t*)((char*)fp->fpbo->bo->map + offset);
 
 		if(nvfx->constbuf[PIPE_SHADER_FRAGMENT]) {
 			struct pipe_resource* constbuf = nvfx->constbuf[PIPE_SHADER_FRAGMENT];
@@ -922,7 +941,6 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 			struct pipe_transfer* transfer;
 			// TODO: does this check make any sense, or should we do this unconditionally?
 			uint32_t* map = pipe_buffer_map(&nvfx->pipe, constbuf, PIPE_TRANSFER_READ, &transfer);
-			uint32_t* fpmap = (uint32_t*)((char*)fp->fpbo->bo->map + offset);
 			uint32_t* buf = (uint32_t*)((char*)fp->fpbo->insn + offset);
 			for (i = 0; i < fp->nr_consts; ++i) {
 				unsigned off = fp->consts[i].offset;
@@ -935,6 +953,25 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 				}
 			}
 			pipe_buffer_unmap(&nvfx->pipe, constbuf, transfer);
+		}
+
+		if(fp->cur_slots_progs_left) {
+			unsigned char* fpbo_slots = &fp->fpbo->slots[fp->bo_prog_idx * 8];
+			for(unsigned i = 0; i < fp->num_semantics; ++i) {
+				unsigned value = fp->cur_slots[i];;
+				if(value != fpbo_slots[i]) {
+					unsigned* p = (unsigned*)fp->sem_relocs[i].data;
+					unsigned* pend = (unsigned*)((char*)fp->sem_relocs[i].data + fp->sem_relocs[i].size);
+					for(; p != pend; ++p) {
+						unsigned off = *p;
+						unsigned dw = fp->insn[off];
+						dw = (dw & ~NVFX_FP_OP_INPUT_SRC_MASK) | (value << NVFX_FP_OP_INPUT_SRC_SHIFT);
+						nvfx_fp_memcpy(&fpmap[*p], &dw, sizeof(dw));
+					}
+					fpbo_slots[i] = value;
+				}
+			}
+			--fp->cur_slots_progs_left;
 		}
 	}
 
@@ -977,6 +1014,7 @@ void
 nvfx_fragprog_destroy(struct nvfx_context *nvfx,
 		      struct nvfx_fragment_program *fp)
 {
+	unsigned i;
 	struct nvfx_fragment_program_bo* fpbo = fp->fpbo;
 	if(fpbo)
 	{
@@ -991,7 +1029,9 @@ nvfx_fragprog_destroy(struct nvfx_context *nvfx,
 		while(fpbo != fp->fpbo);
 	}
 
+	for(i = 0; i < 8; ++i)
+		util_dynarray_fini(&fp->sem_relocs[i]);
+
 	if (fp->insn_len)
 		FREE(fp->insn);
 }
-

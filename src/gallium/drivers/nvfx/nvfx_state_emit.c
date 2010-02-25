@@ -47,7 +47,7 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 	if(dirty & NVFX_NEW_STIPPLE)
 		nvfx_state_stipple_validate(nvfx);
 
-	if(dirty & (NVFX_NEW_FRAGPROG | NVFX_NEW_FRAGCONST))
+	if(dirty & (NVFX_NEW_FRAGPROG | NVFX_NEW_FRAGCONST | NVFX_NEW_VERTPROG))
 		nvfx_fragprog_validate(nvfx);
 
 	if(dirty & NVFX_NEW_SAMPLER)
