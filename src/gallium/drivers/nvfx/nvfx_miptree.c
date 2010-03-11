@@ -6,7 +6,7 @@
 #include "util/u_math.h"
 
 #include "nouveau/nouveau_winsys.h"
-#include "nouveau/nouveau_screen.h"
+#include "nvfx_screen.h"
 #include "nvfx_resource.h"
 #include "nvfx_transfer.h"
 #include "state_tracker/drm_api.h"
@@ -31,6 +31,7 @@ nvfx_miptree_choose_format(struct nvfx_miptree *mt)
 		|| (pt->_usage & PIPE_USAGE_DYNAMIC)
 		|| util_format_is_s3tc(pt->format)
 		|| no_swizzle
+		|| (~((struct nvfx_screen*)pt->screen)->is_nv4x & (pt->flags & PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT))
 	)
 		mt->base.base.flags |= NVFX_RESOURCE_FLAG_LINEAR;
 
