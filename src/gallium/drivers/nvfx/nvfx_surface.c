@@ -118,6 +118,36 @@ nv04_scaled_image_format(enum pipe_format format)
 	}
 }
 
+static struct blitter_context*
+nvfx_get_blitter(struct pipe_context* pipe, int copy)
+{
+	struct nvfx_context* nvfx = nvfx_context(pipe);
+
+	struct blitter_context* blitter = nvfx->blitter;
+	if(!blitter)
+		nvfx->blitter = blitter = util_blitter_create(pipe);
+
+	util_blitter_save_blend(blitter, nvfx->blend);
+	util_blitter_save_depth_stencil_alpha(blitter, nvfx->zsa);
+	util_blitter_save_stencil_ref(blitter, &nvfx->stencil_ref);
+	util_blitter_save_rasterizer(blitter, nvfx->rasterizer);
+	util_blitter_save_fragment_shader(blitter, nvfx->fragprog);
+	util_blitter_save_vertex_shader(blitter, nvfx->vertprog);
+	util_blitter_save_viewport(blitter, &nvfx->viewport);
+	util_blitter_save_framebuffer(blitter, &nvfx->framebuffer);
+	util_blitter_save_clip(blitter, &nvfx->clip);
+	util_blitter_save_vertex_elements(blitter, nvfx->vtxelt);
+	util_blitter_save_vertex_buffers(blitter, nvfx->vtxbuf_nr, nvfx->vtxbuf);
+	
+	if(copy)
+	{
+		util_blitter_save_fragment_sampler_states(blitter, nvfx->nr_samplers, (void**)nvfx->tex_sampler);
+		util_blitter_save_fragment_sampler_views(blitter, nvfx->nr_textures, nvfx->fragment_sampler_views);
+	}
+
+	return blitter;
+}
+
 static void
 nvfx_surface_copy(struct pipe_context* pipe, struct pipe_surface *dsts,
 		  unsigned dx, unsigned dy, struct pipe_surface *srcs, unsigned sx, unsigned sy,
@@ -161,12 +191,11 @@ nvfx_surface_copy(struct pipe_context* pipe, struct pipe_surface *dsts,
 			dst_to_gpu, src_on_gpu);
 	if(!ret)
 	{}
-	else if(ret > 0 && 0 /* TODO: change this once we have blitter support */
-			&& dsts->texture->bind & PIPE_BIND_RENDER_TARGET
+	else if(ret > 0 && dsts->texture->bind & PIPE_BIND_RENDER_TARGET
 			&& srcs->texture->bind & PIPE_BIND_SAMPLER_VIEW
 			)
 	{
-		struct blitter_context* blitter = 0;
+		struct blitter_context* blitter = nvfx_get_blitter(pipe, 1);
 		util_blitter_copy(blitter, dsts, dx, dy, srcs, sx, sy, w, h, TRUE);
 	}
 	else
@@ -192,11 +221,9 @@ nvfx_surface_fill(struct pipe_context* pipe, struct pipe_surface *dsts,
 	int ret = nv04_region_fill_2d(ctx, &dst, w, h, value);
 	if(!ret)
 		return;
-	else if(ret > 0 && 0 /* TODO: change this once we have blitter support */
-			&& dsts->texture->bind & PIPE_BIND_RENDER_TARGET
-			)
+	else if(ret > 0 && dsts->texture->bind & PIPE_BIND_RENDER_TARGET)
 	{
-		struct blitter_context* blitter = 0;
+		struct blitter_context* blitter = nvfx_get_blitter(pipe, 0);
 		util_blitter_fill(blitter, dsts, dx, dy, w, h, value);
 	}
 	else
