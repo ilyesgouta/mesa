@@ -1,8 +1,8 @@
-
 #ifndef NVFX_RESOURCE_H
 #define NVFX_RESOURCE_H
 
 #include "util/u_transfer.h"
+#include "util/u_double_list.h"
 
 struct pipe_resource;
 struct nouveau_bo;
@@ -35,6 +35,10 @@ struct nvfx_miptree {
 struct nvfx_surface {
 	struct pipe_surface base;
 	unsigned pitch;
+
+	struct nouveau_bo* render;
+        struct list_head render_list;
+        struct list_head* render_cache;
 };
 
 static INLINE 
@@ -90,5 +94,43 @@ nvfx_miptree_surface_new(struct pipe_screen *pscreen, struct pipe_resource *pt,
 			 unsigned face, unsigned level, unsigned zslice,
 			 unsigned flags);
 
+
+void
+nvfx_surface_copy_render_temp(struct pipe_surface* surf, int dir);
+
+void
+nvfx_surface_do_use_render_temp(struct pipe_surface* surf, struct list_head* render_cache);
+
+static inline void
+nvfx_surface_use_render_temp(struct pipe_surface* surf, struct list_head* render_cache)
+{
+	if(((struct nvfx_surface*)surf)->render_cache != render_cache)
+		nvfx_surface_do_use_render_temp(surf, render_cache);
+}
+
+void
+nvfx_surface_do_flush(struct pipe_surface* surf);
+
+static inline void
+nvfx_surface_flush(struct pipe_surface* surf)
+{
+	if(((struct nvfx_surface*)surf)->render_cache)
+		nvfx_surface_do_flush(surf);
+}
+
+void
+nvfx_surface_do_flush_render_cache(struct list_head* list);
+
+static inline void
+nvfx_surface_flush_render_cache(struct list_head* list)
+{
+	if(!LIST_IS_EMPTY(list))
+		nvfx_surface_do_flush_render_cache(list);
+}
+
+struct nvfx_render_target;
+
+void
+nvfx_surface_get_render_target(struct pipe_surface* surf, int all_swizzled, struct nvfx_render_target* target);
 
 #endif

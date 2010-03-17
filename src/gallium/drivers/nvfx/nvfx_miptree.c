@@ -258,6 +258,14 @@ nvfx_miptree_surface_new(struct pipe_screen *pscreen, struct pipe_resource *pt,
 void
 nvfx_miptree_surface_del(struct pipe_surface *ps)
 {
+	struct nvfx_surface* ns = (struct nvfx_surface*)ps;
+
+	if(ns->render)
+	{
+		nvfx_surface_flush(ps);
+		nouveau_bo_ref(0, &ns->render);
+	}
+
 	pipe_resource_reference(&ps->texture, NULL);
 	FREE(ps);
 }

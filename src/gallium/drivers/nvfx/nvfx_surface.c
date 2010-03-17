@@ -4,54 +4,94 @@
 #include "util/u_format.h"
 #include "util/u_math.h"
 #include "util/u_memory.h"
+#include "util/u_rect.h"
+#include "util/u_blitter.h"
 
 #include "nouveau/nouveau_winsys.h"
 #include "nouveau/nouveau_util.h"
 #include "nouveau/nouveau_screen.h"
 #include "nvfx_context.h"
 #include "nvfx_screen.h"
-#include "nv04_surface_2d.h"
 #include "nvfx_resource.h"
+#include "nv04_2d.h"
+
+static INLINE void
+nvfx_region_init(struct nv04_region* rgn, struct nvfx_surface* surf, unsigned x, unsigned y)
+{
+	rgn->bo = ((struct nvfx_miptree*)surf->base.texture)->base.bo;
+	rgn->offset = surf->base.offset;
+	rgn->x = x;
+	rgn->y = y;
+	rgn->z = 0;
+
+	unsigned bits = util_format_get_blocksizebits(surf->base.texture->format);
+	switch(bits)
+	{
+	case 8:
+		rgn->bpps = 0;
+		break;
+	case 16:
+		rgn->bpps = 1;
+		break;
+	case 32:
+		rgn->bpps = 2;
+		break;
+	default:
+		assert(util_is_pot(bits));
+		int shift = log2i(bits) - 3;
+		assert(shift >= 2);
+		rgn->bpps = 2;
+		shift -= 2;
+		assert(surf->base.texture->flags & NVFX_RESOURCE_FLAG_LINEAR);
+
+		rgn->x = util_format_get_nblocksx(surf->base.format, x) << shift;
+		rgn->y = util_format_get_nblocksy(surf->base.format, y);
+	}
+
+        if(!(surf->base.texture->flags & NVFX_RESOURCE_FLAG_LINEAR))
+        {
+		unsigned depth = u_minify(surf->base.texture->depth0, surf->base.level);
+
+		// TODO: move this code to surface creation?
+		if((depth <= 1) && (surf->base.height <= 1 || surf->base.width <= 2))
+			rgn->pitch = surf->base.width << rgn->bpps;
+		else if(depth > 1 && surf->base.height <= 2 && surf->base.width <= 2)
+		{
+			rgn->pitch = surf->base.width << rgn->bpps;
+			rgn->offset += (surf->base.zslice * surf->base.width * surf->base.height) << rgn->bpps;
+		}
+		else
+		{
+			rgn->pitch = 0;
+			rgn->z = surf->base.zslice;
+			rgn->w = surf->base.width;
+			rgn->h = surf->base.height;
+			rgn->d = depth;
+		}
+	}
+	else
+	{
+		rgn->pitch = surf->pitch;
+		//rgn->w = rgn->h = rgn->d = rgn->z = 0; // undefined for non-swizzled
+	}
+}
+
+// TODO: actually test this for all formats, it's probably wrong for some...
 
 static INLINE int
 nvfx_surface_format(enum pipe_format format)
 {
-	switch (format) {
-	case PIPE_FORMAT_A8_UNORM:
-	case PIPE_FORMAT_L8_UNORM:
-	case PIPE_FORMAT_I8_UNORM:
+	switch(util_format_get_blocksize(format)) {
+	case 1:
 		return NV04_CONTEXT_SURFACES_2D_FORMAT_Y8;
-	case PIPE_FORMAT_R16_SNORM:
-	case PIPE_FORMAT_B5G6R5_UNORM:
-	case PIPE_FORMAT_Z16_UNORM:
-	case PIPE_FORMAT_L8A8_UNORM:
+	case 2:
+		//return NV04_CONTEXT_SURFACES_2D_FORMAT_Y16;
 		return NV04_CONTEXT_SURFACES_2D_FORMAT_R5G6B5;
-	case PIPE_FORMAT_B8G8R8X8_UNORM:
-	case PIPE_FORMAT_B8G8R8A8_UNORM:
-		return NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8;
-	case PIPE_FORMAT_S8_USCALED_Z24_UNORM:
-	case PIPE_FORMAT_X8Z24_UNORM:
-		return NV04_CONTEXT_SURFACES_2D_FORMAT_Y32;
-	default:
-		return -1;
-	}
-}
-
-static INLINE int
-nv04_rect_format(enum pipe_format format)
-{
-	switch (format) {
-	case PIPE_FORMAT_A8_UNORM:
-		return NV04_GDI_RECTANGLE_TEXT_COLOR_FORMAT_A8R8G8B8;
-	case PIPE_FORMAT_B5G6R5_UNORM:
-	case PIPE_FORMAT_L8A8_UNORM:
-	case PIPE_FORMAT_Z16_UNORM:
-		return NV04_GDI_RECTANGLE_TEXT_COLOR_FORMAT_A16R5G6B5;
-	case PIPE_FORMAT_B8G8R8X8_UNORM:
-	case PIPE_FORMAT_B8G8R8A8_UNORM:
-	case PIPE_FORMAT_S8_USCALED_Z24_UNORM:
-	case PIPE_FORMAT_X8Z24_UNORM:
-		return NV04_GDI_RECTANGLE_TEXT_COLOR_FORMAT_A8R8G8B8;
+	case 4:
+		//if(format == PIPE_FORMAT_B8G8R8X8_UNORM || format == PIPE_FORMAT_B8G8R8A8_UNORM)
+			return NV04_CONTEXT_SURFACES_2D_FORMAT_A8R8G8B8;
+		//else
+		//	return NV04_CONTEXT_SURFACES_2D_FORMAT_Y32;
 	default:
 		return -1;
 	}
@@ -60,448 +100,236 @@ nv04_rect_format(enum pipe_format format)
 static INLINE int
 nv04_scaled_image_format(enum pipe_format format)
 {
-	switch (format) {
-	case PIPE_FORMAT_A8_UNORM:
-	case PIPE_FORMAT_L8_UNORM:
-	case PIPE_FORMAT_I8_UNORM:
+	switch(util_format_get_blocksize(format)) {
+	case 1:
 		return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_Y8;
-	case PIPE_FORMAT_B5G5R5A1_UNORM:
-		return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_A1R5G5B5;
-	case PIPE_FORMAT_B8G8R8A8_UNORM:
-		return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_A8R8G8B8;
-	case PIPE_FORMAT_B8G8R8X8_UNORM:
-		return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_X8R8G8B8;
-	case PIPE_FORMAT_B5G6R5_UNORM:
-	case PIPE_FORMAT_R16_SNORM:
-	case PIPE_FORMAT_L8A8_UNORM:
-		return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_R5G6B5;
+	case 2:
+		//if(format == PIPE_FORMAT_B5G5R5A1_UNORM)
+		//	return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_A1R5G5B5;
+		//else
+			return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_R5G6B5;
+	case 4:
+		if(format == PIPE_FORMAT_B8G8R8X8_UNORM)
+			return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_X8R8G8B8;
+		else
+			return NV03_SCALED_IMAGE_FROM_MEMORY_COLOR_FORMAT_A8R8G8B8;
 	default:
 		return -1;
 	}
 }
 
-static INLINE unsigned
-nv04_swizzle_bits_square(unsigned x, unsigned y)
-{
-	unsigned u = (x & 0x001) << 0 |
-	             (x & 0x002) << 1 |
-	             (x & 0x004) << 2 |
-	             (x & 0x008) << 3 |
-	             (x & 0x010) << 4 |
-	             (x & 0x020) << 5 |
-	             (x & 0x040) << 6 |
-	             (x & 0x080) << 7 |
-	             (x & 0x100) << 8 |
-	             (x & 0x200) << 9 |
-	             (x & 0x400) << 10 |
-	             (x & 0x800) << 11;
-
-	unsigned v = (y & 0x001) << 1 |
-	             (y & 0x002) << 2 |
-	             (y & 0x004) << 3 |
-	             (y & 0x008) << 4 |
-	             (y & 0x010) << 5 |
-	             (y & 0x020) << 6 |
-	             (y & 0x040) << 7 |
-	             (y & 0x080) << 8 |
-	             (y & 0x100) << 9 |
-	             (y & 0x200) << 10 |
-	             (y & 0x400) << 11 |
-	             (y & 0x800) << 12;
-	return v | u;
-}
-
-/* rectangular swizzled textures are linear concatenations of swizzled square tiles */
-static INLINE unsigned
-nv04_swizzle_bits(unsigned x, unsigned y, unsigned w, unsigned h)
-{
-	unsigned s = MIN2(w, h);
-	unsigned m = s - 1;
-	return (((x | y) & ~m) * s) | nv04_swizzle_bits_square(x & m, y & m);
-}
-
-static int
-nvfx_surface_copy_swizzle(struct nvfx_surface_2d *ctx,
-			  struct pipe_surface *dst, int dx, int dy,
-			  struct pipe_surface *src, int sx, int sy,
-			  int w, int h)
-{
-	struct nouveau_channel *chan = ctx->swzsurf->channel;
-	struct nouveau_grobj *swzsurf = ctx->swzsurf;
-	struct nouveau_grobj *sifm = ctx->sifm;
-	struct nouveau_bo *src_bo = ((struct nvfx_miptree*)src->texture)->base.bo;
-	struct nouveau_bo *dst_bo = ((struct nvfx_miptree*)dst->texture)->base.bo;
-	const unsigned src_pitch = ((struct nvfx_surface *)src)->pitch;
-        /* Max width & height may not be the same on all HW, but must be POT */
-	const unsigned max_w = 1024;
-	const unsigned max_h = 1024;
-	unsigned sub_w = w > max_w ? max_w : w;
-	unsigned sub_h = h > max_h ? max_h : h;
-	unsigned x;
-	unsigned y;
-
-        /* Swizzled surfaces must be POT  */
-	assert(util_is_pot(dst->width) && util_is_pot(dst->height));
-
-        /* If area is too large to copy in one shot we must copy it in POT chunks to meet alignment requirements */
-	assert(sub_w == w || util_is_pot(sub_w));
-	assert(sub_h == h || util_is_pot(sub_h));
-
-	MARK_RING (chan, 8 + ((w+sub_w)/sub_w)*((h+sub_h)/sub_h)*17, 2 +
-			 ((w+sub_w)/sub_w)*((h+sub_h)/sub_h)*2);
-
-	BEGIN_RING(chan, swzsurf, NV04_SWIZZLED_SURFACE_DMA_IMAGE, 1);
-	OUT_RELOCo(chan, dst_bo,
-	                 NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-
-	BEGIN_RING(chan, swzsurf, NV04_SWIZZLED_SURFACE_FORMAT, 1);
-	OUT_RING  (chan, nvfx_surface_format(dst->format) |
-	                 log2i(dst->width) << NV04_SWIZZLED_SURFACE_FORMAT_BASE_SIZE_U_SHIFT |
-	                 log2i(dst->height) << NV04_SWIZZLED_SURFACE_FORMAT_BASE_SIZE_V_SHIFT);
-
-	BEGIN_RING(chan, sifm, NV03_SCALED_IMAGE_FROM_MEMORY_DMA_IMAGE, 1);
-	OUT_RELOCo(chan, src_bo,
-	                 NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
-	BEGIN_RING(chan, sifm, NV04_SCALED_IMAGE_FROM_MEMORY_SURFACE, 1);
-	OUT_RING  (chan, swzsurf->handle);
-
-	for (y = 0; y < h; y += sub_h) {
-	  sub_h = MIN2(sub_h, h - y);
-
-	  for (x = 0; x < w; x += sub_w) {
-	    sub_w = MIN2(sub_w, w - x);
-
-	    assert(!(dst->offset & 63));
-
-	    BEGIN_RING(chan, swzsurf, NV04_SWIZZLED_SURFACE_OFFSET, 1);
-	    OUT_RELOCl(chan, dst_bo, dst->offset,
-                             NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-
-	    BEGIN_RING(chan, sifm, NV05_SCALED_IMAGE_FROM_MEMORY_COLOR_CONVERSION, 9);
-	    OUT_RING  (chan, NV05_SCALED_IMAGE_FROM_MEMORY_COLOR_CONVERSION_TRUNCATE);
-	    OUT_RING  (chan, nv04_scaled_image_format(src->format));
-	    OUT_RING  (chan, NV03_SCALED_IMAGE_FROM_MEMORY_OPERATION_SRCCOPY);
-	    OUT_RING  (chan, (x + dx) | ((y + dy) << NV03_SCALED_IMAGE_FROM_MEMORY_CLIP_POINT_Y_SHIFT));
-	    OUT_RING  (chan, sub_h << NV03_SCALED_IMAGE_FROM_MEMORY_CLIP_SIZE_H_SHIFT | sub_w);
-	    OUT_RING  (chan, (x + dx) | ((y + dy) << NV03_SCALED_IMAGE_FROM_MEMORY_OUT_POINT_Y_SHIFT));
-	    OUT_RING  (chan, sub_h << NV03_SCALED_IMAGE_FROM_MEMORY_OUT_SIZE_H_SHIFT | sub_w);
-	    OUT_RING  (chan, 1 << 20);
-	    OUT_RING  (chan, 1 << 20);
-
-	    BEGIN_RING(chan, sifm, NV03_SCALED_IMAGE_FROM_MEMORY_SIZE, 4);
-	    OUT_RING  (chan, sub_h << NV03_SCALED_IMAGE_FROM_MEMORY_SIZE_H_SHIFT | sub_w);
-	    OUT_RING  (chan, src_pitch |
-			     NV03_SCALED_IMAGE_FROM_MEMORY_FORMAT_ORIGIN_CENTER |
-			     NV03_SCALED_IMAGE_FROM_MEMORY_FORMAT_FILTER_POINT_SAMPLE);
-	    OUT_RELOCl(chan, src_bo, src->offset + (sy+y) * src_pitch + (sx+x) * util_format_get_blocksize(src->texture->format),
-                             NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
-	    OUT_RING  (chan, 0);
-	  }
-	}
-
-	return 0;
-}
-
-static int
-nvfx_surface_copy_m2mf(struct nvfx_surface_2d *ctx,
-		       struct pipe_surface *dst, int dx, int dy,
-		       struct pipe_surface *src, int sx, int sy, int w, int h)
-{
-	struct nouveau_channel *chan = ctx->m2mf->channel;
-	struct nouveau_grobj *m2mf = ctx->m2mf;
-	struct nouveau_bo *src_bo = ((struct nvfx_miptree*)src->texture)->base.bo;
-	struct nouveau_bo *dst_bo = ((struct nvfx_miptree*)dst->texture)->base.bo;
-	unsigned src_pitch = ((struct nvfx_surface *)src)->pitch;
-	unsigned dst_pitch = ((struct nvfx_surface *)dst)->pitch;
-	unsigned dst_offset = dst->offset + dy * dst_pitch +
-	                      dx * util_format_get_blocksize(dst->texture->format);
-	unsigned src_offset = src->offset + sy * src_pitch +
-	                      sx * util_format_get_blocksize(src->texture->format);
-
-	MARK_RING (chan, 3 + ((h / 2047) + 1) * 9, 2 + ((h / 2047) + 1) * 2);
-	BEGIN_RING(chan, m2mf, NV04_MEMORY_TO_MEMORY_FORMAT_DMA_BUFFER_IN, 2);
-	OUT_RELOCo(chan, src_bo,
-		   NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
-	OUT_RELOCo(chan, dst_bo,
-		   NOUVEAU_BO_GART | NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-
-	while (h) {
-		int count = (h > 2047) ? 2047 : h;
-
-		BEGIN_RING(chan, m2mf, NV04_MEMORY_TO_MEMORY_FORMAT_OFFSET_IN, 8);
-		OUT_RELOCl(chan, src_bo, src_offset,
-			   NOUVEAU_BO_VRAM | NOUVEAU_BO_GART | NOUVEAU_BO_RD);
-		OUT_RELOCl(chan, dst_bo, dst_offset,
-			   NOUVEAU_BO_VRAM | NOUVEAU_BO_GART | NOUVEAU_BO_WR);
-		OUT_RING  (chan, src_pitch);
-		OUT_RING  (chan, dst_pitch);
-		OUT_RING  (chan, w * util_format_get_blocksize(src->texture->format));
-		OUT_RING  (chan, count);
-		OUT_RING  (chan, 0x0101);
-		OUT_RING  (chan, 0);
-
-		h -= count;
-		src_offset += src_pitch * count;
-		dst_offset += dst_pitch * count;
-	}
-
-	return 0;
-}
-
-static int
-nvfx_surface_copy_blit(struct nvfx_surface_2d *ctx, struct pipe_surface *dst,
-		       int dx, int dy, struct pipe_surface *src, int sx, int sy,
-		       int w, int h)
-{
-	struct nouveau_channel *chan = ctx->surf2d->channel;
-	struct nouveau_grobj *surf2d = ctx->surf2d;
-	struct nouveau_grobj *blit = ctx->blit;
-	struct nouveau_bo *src_bo = ((struct nvfx_miptree*)src->texture)->base.bo;
-	struct nouveau_bo *dst_bo = ((struct nvfx_miptree*)dst->texture)->base.bo;
-	unsigned src_pitch = ((struct nvfx_surface *)src)->pitch;
-	unsigned dst_pitch = ((struct nvfx_surface *)dst)->pitch;
-	int format;
-
-	format = nvfx_surface_format(dst->format);
-	if (format < 0)
-		return 1;
-
-	MARK_RING (chan, 12, 4);
-	BEGIN_RING(chan, surf2d, NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_SOURCE, 2);
-	OUT_RELOCo(chan, src_bo, NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
-	OUT_RELOCo(chan, dst_bo, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-	BEGIN_RING(chan, surf2d, NV04_CONTEXT_SURFACES_2D_FORMAT, 4);
-	OUT_RING  (chan, format);
-	OUT_RING  (chan, (dst_pitch << 16) | src_pitch);
-	OUT_RELOCl(chan, src_bo, src->offset, NOUVEAU_BO_VRAM | NOUVEAU_BO_RD);
-	OUT_RELOCl(chan, dst_bo, dst->offset, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-
-	BEGIN_RING(chan, blit, 0x0300, 3);
-	OUT_RING  (chan, (sy << 16) | sx);
-	OUT_RING  (chan, (dy << 16) | dx);
-	OUT_RING  (chan, ( h << 16) |  w);
-
-	return 0;
-}
-
 static void
-nvfx_surface_copy(struct pipe_context* pipe, struct pipe_surface *dst,
-		  unsigned dx, unsigned dy, struct pipe_surface *src, unsigned sx, unsigned sy,
+nvfx_surface_copy(struct pipe_context* pipe, struct pipe_surface *dsts,
+		  unsigned dx, unsigned dy, struct pipe_surface *srcs, unsigned sx, unsigned sy,
 		  unsigned w, unsigned h)
 {
-	struct nvfx_surface_2d *ctx = &nvfx_screen(pipe->screen)->eng2d;
-	//unsigned src_pitch = ((struct nvfx_surface *)src)->pitch;
-	//unsigned dst_pitch = ((struct nvfx_surface *)dst)->pitch;
-	int src_linear = src->texture->flags & NVFX_RESOURCE_FLAG_LINEAR;
-	int dst_linear = dst->texture->flags & NVFX_RESOURCE_FLAG_LINEAR;
+	struct nv04_2d_context *ctx = nvfx_screen(pipe->screen)->eng2d;
+	struct nv04_region dst, src;
 
-	assert(src->format == dst->format);
+	nvfx_surface_flush(dsts);
+	nvfx_surface_flush(srcs);
 
-	/* Setup transfer to swizzle the texture to vram if needed */
-        if (src_linear && !dst_linear && w > 1 && h > 1) {
-           nvfx_surface_copy_swizzle(ctx, dst, dx, dy, src, sx, sy, w, h);
-           return;
-        }
+	if(!w || !h)
+		return;
 
-        /* Use M2MF instead of the blitter since it always works
-         * Any possible performance drop is likely to be not very significant
-         * and dwarfed anyway by the current buffer management problems
-	 *
-	 * TODO: consider restarting to use the blitter
-         */
+	static int copy_threshold = -1;
+	if(copy_threshold < 0)
+	{
+		copy_threshold = debug_get_num_option("NOUVEAU_COPY_THRESHOLD", 0);
+		if(copy_threshold < 0)
+			copy_threshold = 0;
+	}
 
-	if(0)
-		nvfx_surface_copy_blit(ctx, dst, dx, dy, src, sx, sy, w, h);
+	int dst_to_gpu = !(dsts->texture->_usage & PIPE_USAGE_DYNAMIC);;
+	int src_on_gpu = nouveau_resource_on_gpu(srcs->texture);
 
-        nvfx_surface_copy_m2mf(ctx, dst, dx, dy, src, sx, sy, w, h);
+	//printf("%i %ix%i\n", dsts->format, w, h);
+
+	nvfx_region_init(&dst, (struct nvfx_surface*)dsts, dx, dy);
+	nvfx_region_init(&src, (struct nvfx_surface*)srcs, sx, sy);
+	w = util_format_get_stride(dsts->format, w) >> dst.bpps;
+	h = util_format_get_nblocksy(dsts->format, h);
+
+	//printf("%i %ix%i\n", dsts->format, w, h);
+
+	int ret;
+	if((!dst_to_gpu || !src_on_gpu) && (w * h <= copy_threshold))
+		ret = -1; /* use the CPU */
+	else
+		ret = nv04_region_copy_2d(ctx, &dst, &src, w, h,
+			nvfx_surface_format(dsts->texture->format), nv04_scaled_image_format(dsts->texture->format),
+			dst_to_gpu, src_on_gpu);
+	if(!ret)
+	{}
+	else if(ret > 0 && 0 /* TODO: change this once we have blitter support */
+			&& dsts->texture->bind & PIPE_BIND_RENDER_TARGET
+			&& srcs->texture->bind & PIPE_BIND_SAMPLER_VIEW
+			)
+	{
+		struct blitter_context* blitter = 0;
+		util_blitter_copy(blitter, dsts, dx, dy, srcs, sx, sy, w, h, TRUE);
+	}
+	else
+		nv04_region_copy_cpu(&dst, &src, w, h);
 }
 
 static void
-nvfx_surface_fill(struct pipe_context* pipe, struct pipe_surface *dst,
+nvfx_surface_fill(struct pipe_context* pipe, struct pipe_surface *dsts,
 		  unsigned dx, unsigned dy, unsigned w, unsigned h, unsigned value)
 {
-	struct nvfx_surface_2d *ctx = &nvfx_screen(pipe->screen)->eng2d;
-	struct nouveau_channel *chan = ctx->surf2d->channel;
-	struct nouveau_grobj *surf2d = ctx->surf2d;
-	struct nouveau_grobj *rect = ctx->rect;
-	struct nouveau_bo *dst_bo = ((struct nvfx_miptree*)dst->texture)->base.bo;
-	unsigned dst_pitch = ((struct nvfx_surface *)dst)->pitch;
-	int cs2d_format, gdirect_format;
+	struct nv04_2d_context *ctx = nvfx_screen(pipe->screen)->eng2d;
+	struct nv04_region dst;
+	/* Always try to use the GPU right now, if possible
+	 * If the user wanted the surface data on the CPU, he would have cleared with memset */
 
-	cs2d_format = nvfx_surface_format(dst->format);
-	assert(cs2d_format >= 0);
+	nvfx_surface_flush(dsts);
 
-	gdirect_format = nv04_rect_format(dst->format);
-	assert(gdirect_format >= 0);
+	// we don't care about interior pixel order since we set all them to the same value
+	nvfx_region_init(&dst, (struct nvfx_surface*)dsts, dx, dy);
+	w = util_format_get_stride(dsts->format, w) >> dst.bpps;
+	h = util_format_get_nblocksy(dsts->format, h);
 
-	MARK_RING (chan, 16, 4);
-	BEGIN_RING(chan, surf2d, NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_SOURCE, 2);
-	OUT_RELOCo(chan, dst_bo, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-	OUT_RELOCo(chan, dst_bo, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-	BEGIN_RING(chan, surf2d, NV04_CONTEXT_SURFACES_2D_FORMAT, 4);
-	OUT_RING  (chan, cs2d_format);
-	OUT_RING  (chan, (dst_pitch << 16) | dst_pitch);
-	OUT_RELOCl(chan, dst_bo, dst->offset, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-	OUT_RELOCl(chan, dst_bo, dst->offset, NOUVEAU_BO_VRAM | NOUVEAU_BO_WR);
-
-	BEGIN_RING(chan, rect, NV04_GDI_RECTANGLE_TEXT_COLOR_FORMAT, 1);
-	OUT_RING  (chan, gdirect_format);
-	BEGIN_RING(chan, rect, NV04_GDI_RECTANGLE_TEXT_COLOR1_A, 1);
-	OUT_RING  (chan, value);
-	BEGIN_RING(chan, rect,
-		   NV04_GDI_RECTANGLE_TEXT_UNCLIPPED_RECTANGLE_POINT(0), 2);
-	OUT_RING  (chan, (dx << 16) | dy);
-	OUT_RING  (chan, ( w << 16) |  h);
-}
-
-static void
-nvfx_surface_2d_takedown(struct nvfx_surface_2d* ctx)
-{
-	nouveau_notifier_free(&ctx->ntfy);
-	nouveau_grobj_free(&ctx->m2mf);
-	nouveau_grobj_free(&ctx->surf2d);
-	nouveau_grobj_free(&ctx->swzsurf);
-	nouveau_grobj_free(&ctx->rect);
-	nouveau_grobj_free(&ctx->blit);
-	nouveau_grobj_free(&ctx->sifm);
+	int ret = nv04_region_fill_2d(ctx, &dst, w, h, value);
+	if(!ret)
+		return;
+	else if(ret > 0 && 0 /* TODO: change this once we have blitter support */
+			&& dsts->texture->bind & PIPE_BIND_RENDER_TARGET
+			)
+	{
+		struct blitter_context* blitter = 0;
+		util_blitter_fill(blitter, dsts, dx, dy, w, h, value);
+	}
+	else
+		nv04_region_fill_cpu(&dst, w, h, value);
 }
 
 void
 nvfx_screen_surface_takedown(struct pipe_screen *pscreen)
 {
-	struct nvfx_surface_2d *ctx = &nvfx_screen(pscreen)->eng2d;
-	nvfx_surface_2d_takedown(ctx);
+	nv04_2d_context_takedown(nvfx_screen(pscreen)->eng2d);
+	nvfx_screen(pscreen)->eng2d = 0;
 }
 
 int
 nvfx_screen_surface_init(struct pipe_screen *pscreen)
 {
-	struct nvfx_surface_2d *ctx = &nvfx_screen(pscreen)->eng2d;
-	struct nouveau_channel *chan = nouveau_screen(pscreen)->channel;
-	unsigned handle = 0x88000000, class;
-	int ret;
-
-	ret = nouveau_notifier_alloc(chan, handle++, 1, &ctx->ntfy);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	ret = nouveau_grobj_alloc(chan, handle++, 0x0039, &ctx->m2mf);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	BEGIN_RING(chan, ctx->m2mf, NV04_MEMORY_TO_MEMORY_FORMAT_DMA_NOTIFY, 1);
-	OUT_RING  (chan, ctx->ntfy->handle);
-
-	if (chan->device->chipset < 0x10)
-		class = NV04_CONTEXT_SURFACES_2D;
-	else
-		class = NV10_CONTEXT_SURFACES_2D;
-
-	ret = nouveau_grobj_alloc(chan, handle++, class, &ctx->surf2d);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	BEGIN_RING(chan, ctx->surf2d,
-			 NV04_CONTEXT_SURFACES_2D_DMA_IMAGE_SOURCE, 2);
-	OUT_RING  (chan, chan->vram->handle);
-	OUT_RING  (chan, chan->vram->handle);
-
-	if (chan->device->chipset < 0x10)
-		class = NV04_IMAGE_BLIT;
-	else
-		class = NV12_IMAGE_BLIT;
-
-	ret = nouveau_grobj_alloc(chan, handle++, class, &ctx->blit);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	BEGIN_RING(chan, ctx->blit, NV01_IMAGE_BLIT_DMA_NOTIFY, 1);
-	OUT_RING  (chan, ctx->ntfy->handle);
-	BEGIN_RING(chan, ctx->blit, NV04_IMAGE_BLIT_SURFACE, 1);
-	OUT_RING  (chan, ctx->surf2d->handle);
-	BEGIN_RING(chan, ctx->blit, NV01_IMAGE_BLIT_OPERATION, 1);
-	OUT_RING  (chan, NV01_IMAGE_BLIT_OPERATION_SRCCOPY);
-
-	ret = nouveau_grobj_alloc(chan, handle++, NV04_GDI_RECTANGLE_TEXT,
-				  &ctx->rect);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	BEGIN_RING(chan, ctx->rect, NV04_GDI_RECTANGLE_TEXT_DMA_NOTIFY, 1);
-	OUT_RING  (chan, ctx->ntfy->handle);
-	BEGIN_RING(chan, ctx->rect, NV04_GDI_RECTANGLE_TEXT_SURFACE, 1);
-	OUT_RING  (chan, ctx->surf2d->handle);
-	BEGIN_RING(chan, ctx->rect, NV04_GDI_RECTANGLE_TEXT_OPERATION, 1);
-	OUT_RING  (chan, NV04_GDI_RECTANGLE_TEXT_OPERATION_SRCCOPY);
-	BEGIN_RING(chan, ctx->rect,
-			 NV04_GDI_RECTANGLE_TEXT_MONOCHROME_FORMAT, 1);
-	OUT_RING  (chan, NV04_GDI_RECTANGLE_TEXT_MONOCHROME_FORMAT_LE);
-
-	switch (chan->device->chipset & 0xf0) {
-	case 0x00:
-	case 0x10:
-		class = NV04_SWIZZLED_SURFACE;
-		break;
-	case 0x20:
-		class = NV20_SWIZZLED_SURFACE;
-		break;
-	case 0x30:
-		class = NV30_SWIZZLED_SURFACE;
-		break;
-	case 0x40:
-	case 0x60:
-		class = NV40_SWIZZLED_SURFACE;
-		break;
-	default:
-		/* Famous last words: this really can't happen.. */
-		assert(0);
-		break;
-	}
-
-	ret = nouveau_grobj_alloc(chan, handle++, class, &ctx->swzsurf);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
-	switch (chan->device->chipset & 0xf0) {
-	case 0x10:
-	case 0x20:
-		class = NV10_SCALED_IMAGE_FROM_MEMORY;
-		break;
-	case 0x30:
-		class = NV30_SCALED_IMAGE_FROM_MEMORY;
-		break;
-	case 0x40:
-	case 0x60:
-		class = NV40_SCALED_IMAGE_FROM_MEMORY;
-		break;
-	default:
-		class = NV04_SCALED_IMAGE_FROM_MEMORY;
-		break;
-	}
-
-	ret = nouveau_grobj_alloc(chan, handle++, class, &ctx->sifm);
-	if (ret) {
-		nvfx_surface_2d_takedown(ctx);
-		return ret;
-	}
-
+	struct nv04_2d_context* ctx = nv04_2d_context_init(nouveau_screen(pscreen)->channel);
+	if(!ctx)
+		return -1;
+	nvfx_screen(pscreen)->eng2d = ctx;
 	return 0;
 }
 
-void nvfx_init_surface_functions(struct nvfx_context *nvfx)
+void
+nvfx_init_surface_functions(struct nvfx_context* nvfx)
 {
 	nvfx->pipe.surface_copy = nvfx_surface_copy;
 	nvfx->pipe.surface_fill = nvfx_surface_fill;
+}
+
+void
+nvfx_surface_copy_render_temp(struct pipe_surface* surf, int dir)
+{
+	struct nv04_2d_context* ctx = nvfx_screen(surf->texture->screen)->eng2d;
+	struct nvfx_surface* ns = (struct nvfx_surface*)surf;
+	unsigned w = ns->base.width;
+	unsigned h = ns->base.height;
+	struct nv04_region surfrgn;
+	struct nv04_region render;
+	nvfx_region_init(&surfrgn, ns, 0, 0);
+	render.bo = ns->render;
+	render.offset = 0;
+	render.pitch = align(util_format_get_stride(ns->base.format, ns->base.width), 64);
+	render.bpps = surfrgn.bpps;
+	render.x = render.y = render.z = 0;
+	struct nv04_region* dst = dir ? &render : &surfrgn;
+	struct nv04_region* src = dir ? &surfrgn : &render;
+	if(nv04_region_copy_2d(ctx, dst, src, w, h,
+			nvfx_surface_format(ns->base.format), nv04_scaled_image_format(ns->base.format),
+			1, 1))
+		nv04_region_copy_cpu(dst, src, w, h);
+}
+
+void
+nvfx_surface_do_use_render_temp(struct pipe_surface* surf, struct list_head* render_cache)
+{
+	struct nvfx_surface* ns = (struct nvfx_surface*)surf;
+	if(!ns->render_cache)
+		nvfx_surface_copy_render_temp(surf, 1);
+	else
+	{
+		/* We can keep the surface only on one cache, and the user expects that flushing the old cache
+		 * flushes this surface. Thus, we have no choice except flushing now.
+		 */
+		nvfx_surface_copy_render_temp(surf, 0);
+		LIST_DEL(&ns->render_list);
+	}
+
+	ns->render_cache = render_cache;
+	LIST_ADDTAIL(&ns->render_list, render_cache);
+}
+
+void
+nvfx_surface_do_flush(struct pipe_surface* surf)
+{
+	struct nvfx_surface* ns = (struct nvfx_surface*)surf;
+	//printf("flushing bo %i %ix%i\n", ns->render->handle, ns->base.width, ns->base.height);
+
+	nvfx_surface_copy_render_temp(surf, 0);
+
+	LIST_DEL(&ns->render_list);
+	ns->render_cache = 0;
+}
+
+static inline
+int nvfx_surface_renderable(struct nvfx_surface* ns, int all_swizzled)
+{
+	if(all_swizzled)
+		assert(!(ns->base.texture->flags & NVFX_RESOURCE_FLAG_LINEAR));
+
+	if(ns->base.texture->flags & NVFX_RESOURCE_FLAG_LINEAR)
+		return !(ns->base.offset & 63) && !(ns->pitch & 63);
+	else
+		return all_swizzled;
+}
+
+void nvfx_surface_get_render_target(struct pipe_surface* surf, int all_swizzled, struct nvfx_render_target* target)
+{
+	struct nvfx_surface* ns = (struct nvfx_surface*)surf;
+	if(nvfx_surface_renderable(ns, all_swizzled))
+	{
+		nvfx_surface_flush(surf);
+
+		target->bo = ((struct nvfx_miptree*)ns->base.texture)->base.bo;
+		target->offset = ns->base.offset;
+		target->pitch = align(ns->pitch, 64);
+	}
+	else
+	{
+		if(!ns->render)
+		{
+			unsigned size = util_format_get_2d_size(ns->base.format, align(ns->pitch, 64), ns->base.height);
+			// TODO: 256 alignment is probably too much, 128 or 64 should be correct
+			// TODO: should we put _GART here? seems we shouldn't
+			nouveau_bo_new(nouveau_screen(surf->texture->screen)->device, NOUVEAU_BO_MAP | NOUVEAU_BO_VRAM, 256, size, &ns->render);
+//			printf("render temp!\n");
+		}
+
+		target->bo = ns->render;
+		target->offset = 0;
+		target->pitch = align(ns->pitch, 64);
+	}
+}
+
+void
+nvfx_surface_do_flush_render_cache(struct list_head* list)
+{
+	struct list_head* cur = list->next;
+	struct list_head* next;
+	for(cur = list->next; cur != list; cur = next)
+	{
+		struct nvfx_surface* ns = LIST_ENTRY(struct nvfx_surface, cur, render_list);
+		next = cur->next;
+		nvfx_surface_flush(&ns->base);
+	}
 }

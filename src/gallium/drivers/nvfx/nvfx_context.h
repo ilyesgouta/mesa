@@ -75,9 +75,9 @@ struct nvfx_vtxelt_state {
 };
 
 struct nvfx_render_target {
-	struct nouveau_bo* bo;
-	unsigned offset;
-	unsigned pitch;
+        struct nouveau_bo* bo;
+        unsigned offset;
+        unsigned pitch;
 };
 
 struct nvfx_context {
