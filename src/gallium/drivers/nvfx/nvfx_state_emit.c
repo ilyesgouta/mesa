@@ -1,5 +1,6 @@
 #include "nvfx_context.h"
 #include "nvfx_state.h"
+#include "nvfx_resource.h"
 #include "draw/draw_context.h"
 
 static boolean
@@ -99,6 +100,21 @@ nvfx_state_emit(struct nvfx_context *nvfx)
 	      ;
 	MARK_RING(chan, max_relocs * 2, max_relocs * 2);
 	nvfx_state_relocate(nvfx);
+
+	unsigned render_temps = nvfx->state.render_temps;
+	if(render_temps)
+	{
+		for(int i = 0; i < nvfx->framebuffer.nr_cbufs; ++i)
+		{
+			if(render_temps & (1 << i))
+				nvfx_surface_use_render_temp(nvfx->framebuffer.cbufs[i], &nvfx->render_cache);
+		}
+
+		if(render_temps & 0x80)
+		{
+			nvfx_surface_use_render_temp(nvfx->framebuffer.zsbuf, &nvfx->render_cache);
+		}
+	}
 }
 
 void

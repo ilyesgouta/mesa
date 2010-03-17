@@ -1,6 +1,7 @@
 #include "nvfx_context.h"
 #include "nvfx_resource.h"
 #include "nouveau/nouveau_util.h"
+#include "util/u_format.h"
 
 void
 nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
@@ -9,11 +10,11 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 	struct nouveau_channel *chan = nvfx->screen->base.channel;
 	uint32_t rt_enable = 0, rt_format = 0;
 	int i, colour_format = 0, zeta_format = 0;
-	int depth_only = 0;
 	unsigned rt_flags = NOUVEAU_BO_RDWR | NOUVEAU_BO_VRAM;
 	unsigned w = fb->width;
 	unsigned h = fb->height;
-	int colour_bits = 32, zeta_bits = 32;
+	int all_swizzled = 1;
+	int render_temps = 0;
 
 	if(!nvfx->is_nv4x)
 		assert(fb->nr_cbufs <= 2);
@@ -27,9 +28,23 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 			colour_format = fb->cbufs[i]->format;
 
 		rt_enable |= (NV34TCL_RT_ENABLE_COLOR0 << i);
-		nvfx->hw_rt[i].bo = ((struct nvfx_miptree*)fb->cbufs[i]->texture)->base.bo;
-		nvfx->hw_rt[i].offset = fb->cbufs[i]->offset;
-		nvfx->hw_rt[i].pitch = ((struct nvfx_surface *)fb->cbufs[i])->pitch;
+
+		if(((struct nvfx_miptree*)fb->cbufs[i]->texture)->linear_pitch
+				|| (fb->cbufs[i]->texture->target == PIPE_TEXTURE_3D && u_minify(fb->cbufs[i]->texture->depth0, fb->cbufs[0]->level) > 1)
+				|| (fb->cbufs[i]->offset & 63)
+				|| (fb->cbufs[i]->width != fb->width)
+				|| (fb->cbufs[i]->height != fb->height)
+				)
+			all_swizzled = 0;
+	}
+
+	for (i = 0; i < fb->nr_cbufs; i++)
+	{
+		nvfx_surface_get_render_target(fb->cbufs[i], all_swizzled, &nvfx->hw_rt[i]);
+		if(nvfx->hw_rt[i].bo != ((struct nvfx_miptree*)fb->cbufs[i]->texture)->base.bo)
+			render_temps |= (1 << i);
+		assert(util_format_get_stride(fb->cbufs[i]->format, fb->width) <= nvfx->hw_rt[i].pitch);
+		assert(all_swizzled || nvfx->hw_rt[i].offset + nvfx->hw_rt[i].pitch * fb->height <= nvfx->hw_rt[i].bo->size);
 	}
 	for(; i < 4; ++i)
 		nvfx->hw_rt[i].bo = 0;
@@ -40,43 +55,25 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 
 	if (fb->zsbuf) {
 		zeta_format = fb->zsbuf->format;
-		nvfx->hw_zeta.bo = ((struct nvfx_miptree*)fb->zsbuf->texture)->base.bo;
-		nvfx->hw_zeta.offset = fb->zsbuf->offset;
-		nvfx->hw_zeta.pitch = ((struct nvfx_surface *)fb->zsbuf)->pitch;
+		nvfx_surface_get_render_target(fb->zsbuf, 0, &nvfx->hw_zeta);
+
+		if(nvfx->hw_zeta.bo != ((struct nvfx_miptree*)fb->zsbuf->texture)->base.bo)
+			render_temps |= 0x80;
+
+		assert(util_format_get_stride(fb->zsbuf->format, fb->width) <= nvfx->hw_zeta.pitch);
+		assert(nvfx->hw_zeta.offset + nvfx->hw_zeta.pitch * fb->height <= nvfx->hw_zeta.bo->size);
 	}
-	else
-		nvfx->hw_zeta.bo = 0;
 
-	if (rt_enable & (NV34TCL_RT_ENABLE_COLOR0 | NV34TCL_RT_ENABLE_COLOR1 |
-		NV40TCL_RT_ENABLE_COLOR2 | NV40TCL_RT_ENABLE_COLOR3)) {
-		/* Render to at least a colour buffer */
-		if (!(fb->cbufs[0]->texture->flags & NVFX_RESOURCE_FLAG_LINEAR)) {
-			assert(!(fb->width & (fb->width - 1)) && !(fb->height & (fb->height - 1)));
-			for (i = 1; i < fb->nr_cbufs; i++)
-				assert(!(fb->cbufs[i]->texture->flags & NVFX_RESOURCE_FLAG_LINEAR));
+	nvfx->state.render_temps = render_temps;
 
-			rt_format = NV34TCL_RT_FORMAT_TYPE_SWIZZLED |
-				(log2i(fb->cbufs[0]->width) << NV34TCL_RT_FORMAT_LOG2_WIDTH_SHIFT) |
-				(log2i(fb->cbufs[0]->height) << NV34TCL_RT_FORMAT_LOG2_HEIGHT_SHIFT);
-		}
-		else
-			rt_format = NV34TCL_RT_FORMAT_TYPE_LINEAR;
-	} else if (fb->zsbuf) {
-		depth_only = 1;
+	if (fb->nr_cbufs && all_swizzled) {
+		assert(!(fb->width & (fb->width - 1)) && !(fb->height & (fb->height - 1)));
 
-		/* Render to depth buffer only */
-		if (!(fb->zsbuf->texture->flags & NVFX_RESOURCE_FLAG_LINEAR)) {
-			assert(!(fb->width & (fb->width - 1)) && !(fb->height & (fb->height - 1)));
-
-			rt_format = NV34TCL_RT_FORMAT_TYPE_SWIZZLED |
-				(log2i(fb->zsbuf->width) << NV34TCL_RT_FORMAT_LOG2_WIDTH_SHIFT) |
-				(log2i(fb->zsbuf->height) << NV34TCL_RT_FORMAT_LOG2_HEIGHT_SHIFT);
-		}
-		else
-			rt_format = NV34TCL_RT_FORMAT_TYPE_LINEAR;
-	} else {
-		return;
-	}
+		rt_format = NV34TCL_RT_FORMAT_TYPE_SWIZZLED |
+			(log2i(fb->width) << NV34TCL_RT_FORMAT_LOG2_WIDTH_SHIFT) |
+			(log2i(fb->height) << NV34TCL_RT_FORMAT_LOG2_HEIGHT_SHIFT);
+	} else
+		rt_format = NV34TCL_RT_FORMAT_TYPE_LINEAR;
 
 	switch (colour_format) {
 	case PIPE_FORMAT_B8G8R8X8_UNORM:
@@ -88,7 +85,6 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 		break;
 	case PIPE_FORMAT_B5G6R5_UNORM:
 		rt_format |= NV34TCL_RT_FORMAT_COLOR_R5G6B5;
-		colour_bits = 16;
 		break;
 	default:
 		assert(0);
@@ -97,7 +93,6 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 	switch (zeta_format) {
 	case PIPE_FORMAT_Z16_UNORM:
 		rt_format |= NV34TCL_RT_FORMAT_ZETA_Z16;
-		zeta_bits = 16;
 		break;
 	case PIPE_FORMAT_S8_USCALED_Z24_UNORM:
 	case PIPE_FORMAT_X8Z24_UNORM:
@@ -108,24 +103,19 @@ nvfx_state_framebuffer_validate(struct nvfx_context *nvfx)
 		assert(0);
 	}
 
-	if ((!nvfx->is_nv4x) && colour_bits > zeta_bits) {
-		/* TODO: does this limitation really exist?
-		   TODO: can it be worked around somehow? */
-		assert(0);
-	}
-
-	if ((rt_enable & NV34TCL_RT_ENABLE_COLOR0)
-		|| ((!nvfx->is_nv4x) && depth_only)) {
-		struct nvfx_render_target *rt0 = (depth_only ? &nvfx->hw_zeta : &nvfx->hw_rt[0]);
+	if ((rt_enable & NV34TCL_RT_ENABLE_COLOR0) || fb->zsbuf) {
+		struct nvfx_render_target *rt0 = &nvfx->hw_rt[0];
 		uint32_t pitch = rt0->pitch;
+
+		if(!(rt_enable & NV34TCL_RT_ENABLE_COLOR0))
+			rt0 = &nvfx->hw_zeta;
 
 		if(!nvfx->is_nv4x)
 		{
-			if (nvfx->hw_zeta.bo) {
+			if (nvfx->hw_zeta.bo)
 				pitch |= (nvfx->hw_zeta.pitch << 16);
-			} else {
+			else
 				pitch |= (pitch << 16);
-			}
 		}
 
 		OUT_RING(chan, RING_3D(NV34TCL_DMA_COLOR0, 1));

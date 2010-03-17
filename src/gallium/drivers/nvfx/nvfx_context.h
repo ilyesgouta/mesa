@@ -11,6 +11,7 @@
 #include "util/u_memory.h"
 #include "util/u_math.h"
 #include "util/u_inlines.h"
+#include "util/u_double_list.h"
 
 #include "draw/draw_vertex.h"
 
@@ -67,6 +68,7 @@ struct nvfx_state {
 	unsigned scissor_enabled;
 	unsigned stipple_enabled;
 	unsigned fp_samplers;
+	unsigned render_temps;
 };
 
 struct nvfx_vtxelt_state {
@@ -89,6 +91,7 @@ struct nvfx_context {
 	unsigned is_nv4x; /* either 0 or ~0 */
 
 	struct draw_context *draw;
+	struct list_head render_cache;
 
 	/* HW state derived from pipe states */
 	struct nvfx_state state;
