@@ -330,7 +330,7 @@ alloc_texture(struct st_context *st, GLsizei width, GLsizei height,
    }
 
    pt = st_texture_create(st, PIPE_TEXTURE_2D, texFormat, 0,
-                          ptw, pth, 1, PIPE_BIND_SAMPLER_VIEW);
+                          ptw, pth, 1, PIPE_BIND_SAMPLER_VIEW, 0);
 
    return pt;
 }

@@ -247,6 +247,7 @@ guess_and_alloc_texture(struct st_context *st,
    GLuint height = stImage->base.Height2;
    GLuint depth = stImage->base.Depth2;
    GLuint i, usage;
+   GLuint flags;
    enum pipe_format fmt;
 
    DBG("%s\n", __FUNCTION__);
@@ -313,6 +314,11 @@ guess_and_alloc_texture(struct st_context *st,
 
    usage = default_usage(fmt);
 
+   flags = 0;
+
+   if(stObj->base.Target == GL_TEXTURE_RECTANGLE)
+      flags |= PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
+
    stObj->pt = st_texture_create(st,
                                  gl_target_to_pipe(stObj->base.Target),
                                  fmt,
@@ -320,7 +326,8 @@ guess_and_alloc_texture(struct st_context *st,
                                  width,
                                  height,
                                  depth,
-                                 usage);
+                                 usage,
+                                 flags);
 
    stObj->pipe = st->pipe;
 
@@ -1851,6 +1858,10 @@ st_finalize_texture(GLcontext *ctx,
       const enum pipe_format fmt =
          st_mesa_format_to_pipe_format(firstImage->base.TexFormat);
       GLuint usage = default_usage(fmt);
+      GLuint flags = 0;
+
+      if(stObj->base.Target == GL_TEXTURE_RECTANGLE)
+         flags |= PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
 
       stObj->pt = st_texture_create(ctx->st,
                                     gl_target_to_pipe(stObj->base.Target),
@@ -1859,7 +1870,8 @@ st_finalize_texture(GLcontext *ctx,
                                     firstImage->base.Width2,
                                     firstImage->base.Height2,
                                     firstImage->base.Depth2,
-                                    usage);
+                                    usage,
+                                    flags);
 
       if (!stObj->pt) {
          _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage");
