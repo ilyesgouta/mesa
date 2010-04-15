@@ -265,7 +265,7 @@ guess_and_alloc_texture(struct st_context *st,
 {
    const GLuint dims = get_texture_dims(stObj->base.Target);
    GLuint level, lastLevel, width, height, depth;
-   GLuint bindings;
+   GLuint bindings, flags;
    enum pipe_format fmt;
 
    DBG("%s\n", __FUNCTION__);
@@ -343,6 +343,11 @@ guess_and_alloc_texture(struct st_context *st,
 
    bindings = default_bindings(st, fmt);
 
+   flags = 0;
+
+   if(stObj->base.Target == GL_TEXTURE_RECTANGLE)
+      flags |= PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
+
    stObj->pt = st_texture_create(st,
                                  gl_target_to_pipe(stObj->base.Target),
                                  fmt,
@@ -350,7 +355,8 @@ guess_and_alloc_texture(struct st_context *st,
                                  width,
                                  height,
                                  depth,
-                                 bindings);
+                                 bindings,
+                                 flags);
 
    DBG("%s returning %d\n", __FUNCTION__, (stObj->pt != NULL));
 
@@ -457,6 +463,7 @@ compress_with_blit(GLcontext * ctx,
    templ.last_level = 0;
    templ.usage = PIPE_USAGE_DEFAULT;
    templ.bind = PIPE_BIND_SAMPLER_VIEW;
+   templ.flags = (util_is_pot(width) && util_is_pot(height)) ? 0 : PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
    src_tex = screen->resource_create(screen, &templ);
 
    if (!src_tex)
@@ -1867,6 +1874,10 @@ st_finalize_texture(GLcontext *ctx,
     */
    if (!stObj->pt) {
       GLuint bindings = default_bindings(st, firstImageFormat);
+      GLuint flags = 0;
+
+      if(stObj->base.Target == GL_TEXTURE_RECTANGLE)
+         flags |= PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
 
       stObj->pt = st_texture_create(st,
                                     gl_target_to_pipe(stObj->base.Target),
@@ -1875,7 +1886,8 @@ st_finalize_texture(GLcontext *ctx,
                                     stObj->width0,
                                     stObj->height0,
                                     stObj->depth0,
-                                    bindings);
+                                    bindings,
+                                    flags);
 
       if (!stObj->pt) {
          _mesa_error(ctx, GL_OUT_OF_MEMORY, "glTexImage");

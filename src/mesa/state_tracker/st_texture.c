@@ -59,7 +59,8 @@ st_texture_create(struct st_context *st,
 		  GLuint width0,
 		  GLuint height0,
 		  GLuint depth0,
-                  GLuint bind )
+                  GLuint bind,
+                  GLuint flags)
 {
    struct pipe_resource pt, *newtex;
    struct pipe_screen *screen = st->pipe->screen;
@@ -86,7 +87,7 @@ st_texture_create(struct st_context *st,
    pt.depth0 = depth0;
    pt.usage = PIPE_USAGE_DEFAULT;
    pt.bind = bind;
-   pt.flags = 0;
+   pt.flags = flags;
 
    newtex = screen->resource_create(screen, &pt);
 
