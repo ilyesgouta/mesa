@@ -234,7 +234,10 @@ st_generate_mipmap(GLcontext *ctx, GLenum target,
       struct pipe_resource *oldTex = stObj->pt;
       GLboolean needFlush;
 
-      /* create new texture with space for more levels */
+      /* create new texture with space for more levels
+       * we never set UNNORMALIZED_COORDS_HINT here since, in OpenGL,
+       * mipmaps always mean normalized coords as well
+       */
       stObj->pt = st_texture_create(st,
                                     oldTex->target,
                                     oldTex->format,
@@ -242,7 +245,8 @@ st_generate_mipmap(GLcontext *ctx, GLenum target,
                                     oldTex->width0,
                                     oldTex->height0,
                                     oldTex->depth0,
-                                    oldTex->bind);
+                                    oldTex->bind,
+                                    0);
 
       /* The texture isn't in a "complete" state yet so set the expected
        * lastLevel here, since it won't get done in st_finalize_texture().

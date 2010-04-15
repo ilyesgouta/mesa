@@ -152,7 +152,8 @@ st_texture_create(struct st_context *st,
                   GLuint width0,
                   GLuint height0,
                   GLuint depth0,
-                  GLuint tex_usage );
+                  GLuint tex_usage,
+                  GLuint flags);
 
 
 /* Check if an image fits into an existing texture object.
