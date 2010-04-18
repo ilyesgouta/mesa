@@ -172,11 +172,7 @@ nvfx_surface_copy(struct pipe_context* pipe, struct pipe_surface *dsts,
 
 	static int copy_threshold = -1;
 	if(copy_threshold < 0)
-	{
-		copy_threshold = debug_get_num_option("NOUVEAU_COPY_THRESHOLD", 0);
-		if(copy_threshold < 0)
-			copy_threshold = 0;
-	}
+		copy_threshold = debug_get_num_option("NOUVEAU_COPY_THRESHOLD", 4);
 
 	int dst_to_gpu = !(dsts->texture->_usage & PIPE_USAGE_DYNAMIC);;
 	int src_on_gpu = nouveau_resource_on_gpu(srcs->texture);
