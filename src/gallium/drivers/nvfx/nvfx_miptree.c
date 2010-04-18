@@ -10,6 +10,7 @@
 #include "nvfx_resource.h"
 #include "nvfx_transfer.h"
 #include "state_tracker/drm_api.h"
+#include "nv04_2d.h"
 
 static void
 nvfx_miptree_choose_format(struct nvfx_miptree *mt)
@@ -107,15 +108,22 @@ nvfx_miptree_get_handle(struct pipe_screen *pscreen,
 
 
 static void
+nvfx_miptree_surface_final_destroy(struct pipe_surface* ps)
+{
+	struct nvfx_surface* ns = (struct nvfx_surface*)ps;
+	pipe_resource_reference(&ps->texture, 0);
+	nouveau_bo_ref(0, &ns->temp);
+	FREE(ps);
+}
+
+static void
 nvfx_miptree_destroy(struct pipe_screen *screen, struct pipe_resource *pt)
 {
 	struct nvfx_miptree *mt = (struct nvfx_miptree *)pt;
+	util_surfaces_destroy(&mt->surfaces, pt, nvfx_miptree_surface_final_destroy);
 	nouveau_screen_bo_release(screen, mt->base.bo);
 	FREE(mt);
 }
-
-
-
 
 struct u_resource_vtbl nvfx_miptree_vtbl = 
 {
@@ -131,6 +139,21 @@ struct u_resource_vtbl nvfx_miptree_vtbl =
 };
 
 static struct nvfx_miptree*
+nvfx_miptree_alloc()
+{
+        struct nvfx_miptree *mt;
+
+        mt = CALLOC_STRUCT(nvfx_miptree);
+        if (!mt)
+                return NULL;
+
+        mt->base.vtbl = &nvfx_miptree_vtbl;
+        util_dirty_surfaces_init(&mt->dirty_surfaces);
+
+        return mt;
+}
+
+static struct nvfx_miptree*
 nvfx_miptree_create_skeleton(struct pipe_screen *pscreen, const struct pipe_resource *pt)
 {
         struct nvfx_miptree *mt;
@@ -138,12 +161,11 @@ nvfx_miptree_create_skeleton(struct pipe_screen *pscreen, const struct pipe_reso
         if(pt->width0 > 4096 || pt->height0 > 4096)
                 return NULL;
 
-        mt = CALLOC_STRUCT(nvfx_miptree);
-        if (!mt)
-                return NULL;
+        mt = nvfx_miptree_alloc();
+        if(!mt)
+        	return NULL;
 
         mt->base.base = *pt;
-        mt->base.vtbl = &nvfx_miptree_vtbl;
         pipe_reference_init(&mt->base.base.reference, 1);
         mt->base.base.screen = pscreen;
 
@@ -205,6 +227,39 @@ nvfx_miptree_from_handle(struct pipe_screen *pscreen, const struct pipe_resource
         return &mt->base.base;
 }
 
+/* hack to use the 3D engine on arbitrary regions
+ * TODO: we may want stop using util_blitter and have ad-hoc 3D code to avoid this horribly inefficient setup
+ */
+struct pipe_resource*
+nvfx_miptree_from_region(struct pipe_screen* pscreen, struct nv04_region* rgn, enum pipe_format format, unsigned w, unsigned h)
+{
+	struct nvfx_miptree* mt = nvfx_miptree_alloc();
+	struct pipe_resource* pt;
+	if (!mt)
+		return NULL;
+
+	pt = &mt->base.base;
+        pipe_reference_init(&pt->reference, 1);
+	pt->screen = pscreen;
+	pt->target = PIPE_TEXTURE_2D;
+	pt->format = format;
+	pt->width0 = w;
+	pt->height0 = h;
+	pt->depth0 = rgn->pitch ? 1 : rgn->d;
+	pt->bind = PIPE_BIND_SAMPLER_VIEW | PIPE_BIND_RENDER_TARGET;
+	if(util_format_is_depth_or_stencil(format))
+		pt->bind |= PIPE_BIND_DEPTH_STENCIL;
+	pt->_usage = PIPE_USAGE_DEFAULT;
+	mt->linear_pitch = rgn->pitch;
+	if(rgn->pitch)
+		pt->flags = NVFX_RESOURCE_FLAG_LINEAR;
+
+	nouveau_bo_ref(rgn->bo, &mt->base.bo);
+
+	nvfx_miptree_layout(mt);
+	return &mt->base.base;
+}
+
 /* Surface helpers, not strictly required to implement the resource vtbl:
  */
 struct pipe_surface *
@@ -215,32 +270,23 @@ nvfx_miptree_surface_new(struct pipe_screen *pscreen, struct pipe_resource *pt,
 	struct nvfx_miptree *mt = (struct nvfx_miptree *)pt;
 	struct nvfx_surface *ns;
 
-	ns = CALLOC_STRUCT(nvfx_surface);
-	if (!ns)
-		return NULL;
-	pipe_resource_reference(&ns->base.texture, pt);
-	ns->base.format = pt->format;
-	ns->base.width = u_minify(pt->width0, level);
-	ns->base.height = u_minify(pt->height0, level);
-	ns->base.usage = flags;
-	pipe_reference_init(&ns->base.reference, 1);
-	ns->base.face = face;
-	ns->base.level = level;
-	ns->base.zslice = zslice;
+	ns = (struct nvfx_surface*)util_surfaces_get(&mt->surfaces, sizeof(struct nvfx_surface), pscreen, pt, face, level, zslice, flags);
+	if(ns->base.base.offset == ~0) {
+		util_dirty_surface_init(&ns->base);
+		if(mt->linear_pitch)
+			ns->pitch = mt->linear_pitch;
+		else
+			ns->pitch = util_format_get_stride(ns->base.base.format, ns->base.base.width);
 
-	if(mt->linear_pitch)
-		ns->pitch = mt->linear_pitch;
-	else
-		ns->pitch = util_format_get_stride(ns->base.format, ns->base.width);
+		ns->base.base.offset = mt->level_offset[level];
+		if (pt->target == PIPE_TEXTURE_CUBE)
+			ns->base.base.offset += mt->face_size * face;
+		else if (pt->target == PIPE_TEXTURE_3D && mt->linear_pitch)
+			ns->base.base.offset += zslice
+			* util_format_get_2d_size(ns->base.base.format, (mt->linear_pitch ? mt->linear_pitch : util_format_get_stride(ns->base.base.format, ns->base.base.width)),  ns->base.base.height);
+	}
 
-	ns->base.offset = mt->level_offset[level];
-	if (pt->target == PIPE_TEXTURE_CUBE)
-		ns->base.offset += mt->face_size * face;
-	else if (pt->target == PIPE_TEXTURE_3D && mt->linear_pitch)
-		ns->base.offset += zslice
-		* util_format_get_2d_size(ns->base.format, (mt->linear_pitch ? mt->linear_pitch : util_format_get_stride(ns->base.format, ns->base.width)),  ns->base.height);
-
-	return &ns->base;
+	return &ns->base.base;
 }
 
 void
@@ -248,12 +294,10 @@ nvfx_miptree_surface_del(struct pipe_surface *ps)
 {
 	struct nvfx_surface* ns = (struct nvfx_surface*)ps;
 
-	if(ns->render)
+	if(!ns->temp)
 	{
-		nvfx_surface_flush(ps);
-		nouveau_bo_ref(0, &ns->render);
+		util_surfaces_detach(&((struct nvfx_miptree*)ps->texture)->surfaces, ps);
+		pipe_resource_reference(&ps->texture, 0);
+		FREE(ps);
 	}
-
-	pipe_resource_reference(&ps->texture, NULL);
-	FREE(ps);
 }

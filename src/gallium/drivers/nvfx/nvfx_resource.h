@@ -3,10 +3,12 @@
 
 #include "util/u_transfer.h"
 #include "util/u_double_list.h"
+#include "util/u_surfaces.h"
+#include "util/u_dirty_surfaces.h"
 
 struct pipe_resource;
 struct nouveau_bo;
-
+struct nv04_region;
 
 /* This gets further specialized into either buffer or texture
  * structures.  In the future we'll want to remove much of that
@@ -24,21 +26,34 @@ struct nvfx_resource {
 
 #define NVFX_MAX_TEXTURE_LEVELS  16
 
+/* We have the following invariants for render temporaries
+ *
+ * 1. Render temporaries are always linear
+ * 2. Render temporaries are always up to date
+ * 3. Currently, render temporaries are destroy when the resource is used for sampling, but kept for any other use
+ *
+ * Also, we do NOT flush temporaries on any pipe->flush().
+ * This is fine, as long as scanout targets and shared resources never need temps
+ *
+ * TODO: we may want to also support swizzled temporaries to improve performance in some cases.
+ */
+
 struct nvfx_miptree {
         struct nvfx_resource base;
 
         unsigned linear_pitch; /* for linear textures, 0 for swizzled and compressed textures with level-dependent minimal pitch */
         unsigned face_size; /* 128-byte aligned face/total size */
         unsigned level_offset[NVFX_MAX_TEXTURE_LEVELS];
+
+        struct util_surfaces surfaces;
+        struct util_dirty_surfaces dirty_surfaces;
 };
 
 struct nvfx_surface {
-	struct pipe_surface base;
+	struct util_dirty_surface base;
 	unsigned pitch;
 
-	struct nouveau_bo* render;
-        struct list_head render_list;
-        struct list_head* render_cache;
+	struct nouveau_bo* temp;
 };
 
 static INLINE 
@@ -55,6 +70,12 @@ nvfx_surface_buffer(struct pipe_surface *surf)
 	return mt->bo;
 }
 
+static INLINE struct util_dirty_surfaces*
+nvfx_surface_get_dirty_surfaces(struct pipe_surface* surf)
+{
+	struct nvfx_miptree *mt = (struct nvfx_miptree *)surf->texture;
+	return &mt->dirty_surfaces;
+}
 
 void
 nvfx_init_resource_functions(struct pipe_context *pipe);
@@ -73,6 +94,9 @@ struct pipe_resource *
 nvfx_miptree_from_handle(struct pipe_screen *pscreen,
 			 const struct pipe_resource *template,
 			 struct winsys_handle *whandle);
+
+struct pipe_resource*
+nvfx_miptree_from_region(struct pipe_screen* pscreen, struct nv04_region* rgn, enum pipe_format format, unsigned w, unsigned h);
 
 struct pipe_resource *
 nvfx_buffer_create(struct pipe_screen *pscreen,
@@ -94,43 +118,10 @@ nvfx_miptree_surface_new(struct pipe_screen *pscreen, struct pipe_resource *pt,
 			 unsigned face, unsigned level, unsigned zslice,
 			 unsigned flags);
 
+void
+nvfx_surface_create_temp(struct pipe_context* pipe, struct pipe_surface* surf);
 
 void
-nvfx_surface_copy_render_temp(struct pipe_surface* surf, int dir);
-
-void
-nvfx_surface_do_use_render_temp(struct pipe_surface* surf, struct list_head* render_cache);
-
-static inline void
-nvfx_surface_use_render_temp(struct pipe_surface* surf, struct list_head* render_cache)
-{
-	if(((struct nvfx_surface*)surf)->render_cache != render_cache)
-		nvfx_surface_do_use_render_temp(surf, render_cache);
-}
-
-void
-nvfx_surface_do_flush(struct pipe_surface* surf);
-
-static inline void
-nvfx_surface_flush(struct pipe_surface* surf)
-{
-	if(((struct nvfx_surface*)surf)->render_cache)
-		nvfx_surface_do_flush(surf);
-}
-
-void
-nvfx_surface_do_flush_render_cache(struct list_head* list);
-
-static inline void
-nvfx_surface_flush_render_cache(struct list_head* list)
-{
-	if(!LIST_IS_EMPTY(list))
-		nvfx_surface_do_flush_render_cache(list);
-}
-
-struct nvfx_render_target;
-
-void
-nvfx_surface_get_render_target(struct pipe_surface* surf, int all_swizzled, struct nvfx_render_target* target);
+nvfx_surface_flush(struct pipe_context* pipe, struct pipe_surface* surf);
 
 #endif

@@ -92,10 +92,10 @@ nvfx_sampler_state_create(struct pipe_context *pipe,
 	/* on nv30, we use this as an internal flag */
 	ps->fmt = cso->normalized_coords ? 0 : NV40TCL_TEX_FORMAT_RECT;
 	ps->en = 0;
-	ps->filt = nvfx_tex_filter(cso);
+	ps->filt = nvfx_tex_filter(cso) | 0x1fd6;
 	ps->wrap = (nvfx_tex_wrap_mode(cso->wrap_s) << NV34TCL_TX_WRAP_S_SHIFT) |
 		    (nvfx_tex_wrap_mode(cso->wrap_t) << NV34TCL_TX_WRAP_T_SHIFT) |
-		    (nvfx_tex_wrap_mode(cso->wrap_r) << NV34TCL_TX_WRAP_R_SHIFT) |
+		    (3 /*nvfx_tex_wrap_mode(cso->wrap_r) */ << NV34TCL_TX_WRAP_R_SHIFT) |
 		    nvfx_tex_wrap_compare_mode(cso);
 	ps->bcol = nvfx_tex_border_color(cso->border_color);
 

@@ -14,9 +14,7 @@ nvfx_flush(struct pipe_context *pipe, unsigned flags,
 	struct nouveau_channel *chan = screen->base.channel;
 	struct nouveau_grobj *eng3d = screen->eng3d;
 
-	if (flags & PIPE_FLUSH_RENDER_CACHE)
-		nvfx_surface_flush_render_cache(&nvfx->render_cache);
-
+	/* XXX: we need to actually be intelligent here */
 	if (flags & PIPE_FLUSH_TEXTURE_CACHE) {
 		BEGIN_RING(chan, eng3d, 0x1fd8, 1);
 		OUT_RING  (chan, 2);
@@ -68,7 +66,7 @@ nvfx_create(struct pipe_screen *pscreen, void *priv)
 	nvfx->is_nv4x = screen->is_nv4x;
 
 	nvfx_init_query_functions(nvfx);
-	nvfx_init_surface_functions(&nvfx->pipe);
+	nvfx_init_surface_functions(nvfx);
 	nvfx_init_state_functions(nvfx);
 	nvfx_init_resource_functions(&nvfx->pipe);
 

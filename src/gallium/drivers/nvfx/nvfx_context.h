@@ -187,7 +187,8 @@ extern void nvfx_draw_elements_swtnl(struct pipe_context *pipe,
 extern void nvfx_vtxfmt_validate(struct nvfx_context *nvfx);
 
 /* nvfx_fb.c */
-extern void nvfx_state_framebuffer_validate(struct nvfx_context *nvfx);
+extern int nvfx_framebuffer_prepare(struct nvfx_context *nvfx);
+extern void nvfx_framebuffer_validate(struct nvfx_context *nvfx, unsigned prepare_result);
 void
 nvfx_framebuffer_relocate(struct nvfx_context *nvfx);
 

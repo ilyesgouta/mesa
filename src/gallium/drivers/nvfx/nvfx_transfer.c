@@ -179,10 +179,10 @@ nvfx_miptree_transfer_map(struct pipe_context *pipe, struct pipe_transfer *ptx)
 					     nouveau_screen_transfer_flags(ptx->usage));
 
 	if(!tx->direct)
-		return map + ns->base.offset;
+		return map + ns->base.base.offset;
 	else
-		return map + ns->base.offset
-		+ util_format_get_2d_size(ns->base.format, ns->pitch, ptx->box.y)
+		return map + ns->base.base.offset
+		+ util_format_get_2d_size(ns->base.base.format, ns->pitch, ptx->box.y)
 		+ util_format_get_stride(ptx->resource->format, ptx->box.x);
 }
 

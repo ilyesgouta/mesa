@@ -7,10 +7,21 @@ static boolean
 nvfx_state_validate_common(struct nvfx_context *nvfx)
 {
 	struct nouveau_channel* chan = nvfx->screen->base.channel;
-	unsigned dirty = nvfx->dirty;
+	unsigned dirty;
+	unsigned prepare_result;
+
+	dirty = nvfx->dirty;
 
 	if(nvfx != nvfx->screen->cur_ctx)
 		dirty = ~0;
+
+	/* this can use the 3D engine to unswizzle render targets to temporaries
+	 * of course, this dirties all 3D state, so we must restart from scratch afterwards
+	 */
+	if(nvfx->dirty & NVFX_NEW_FB)
+		prepare_result = nvfx_framebuffer_prepare(nvfx);
+
+	dirty = nvfx->dirty;
 
 	if(nvfx->render_mode == HW)
 	{
@@ -36,9 +47,6 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 			nvfx_vtxfmt_validate(nvfx);
 	}
 
-	if(dirty & NVFX_NEW_FB)
-		nvfx_state_framebuffer_validate(nvfx);
-
 	if(dirty & NVFX_NEW_RAST)
 		sb_emit(chan, nvfx->rasterizer->sb, nvfx->rasterizer->sb_len);
 
@@ -53,6 +61,10 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 
 	if(dirty & NVFX_NEW_SAMPLER)
 		nvfx_fragtex_validate(nvfx);
+
+	/* must be after fragtex, so we don't flush dirtied temporaries if they are mapped both as sampler and render target */
+	if(dirty & NVFX_NEW_FB)
+		nvfx_framebuffer_validate(nvfx, prepare_result);
 
 	if(dirty & NVFX_NEW_BLEND)
 		sb_emit(chan, nvfx->blend->sb, nvfx->blend->sb_len);
@@ -107,13 +119,13 @@ nvfx_state_emit(struct nvfx_context *nvfx)
 		for(int i = 0; i < nvfx->framebuffer.nr_cbufs; ++i)
 		{
 			if(render_temps & (1 << i))
-				nvfx_surface_use_render_temp(nvfx->framebuffer.cbufs[i], &nvfx->render_cache);
+				util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.cbufs[i]),
+						(struct util_dirty_surface*)nvfx->framebuffer.cbufs[i]);
 		}
 
 		if(render_temps & 0x80)
-		{
-			nvfx_surface_use_render_temp(nvfx->framebuffer.zsbuf, &nvfx->render_cache);
-		}
+			util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.zsbuf),
+					(struct util_dirty_surface*)nvfx->framebuffer.zsbuf);
 	}
 }
 
