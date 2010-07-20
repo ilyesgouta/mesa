@@ -26,6 +26,7 @@
  **************************************************************************/
 
 #include "util/u_memory.h"
+#include "util/u_math.h"
 #include "pipe/p_context.h"
 #include "draw/draw_context.h"
 #include "draw/draw_private.h"
@@ -57,7 +58,8 @@ dot4(const float *a, const float *b)
 }
 
 static INLINE unsigned
-compute_clipmask_gl(const float *clip, /*const*/ float plane[][4], unsigned nr)
+compute_clipmask_gl(const float *clip, /*const*/ float plane[][4], unsigned nr,
+                    boolean clip_depth)
 {
    unsigned mask = 0x0;
    unsigned i;
@@ -74,8 +76,10 @@ compute_clipmask_gl(const float *clip, /*const*/ float plane[][4], unsigned nr)
    if ( clip[0] + clip[3] < 0) mask |= (1<<1);
    if (-clip[1] + clip[3] < 0) mask |= (1<<2);
    if ( clip[1] + clip[3] < 0) mask |= (1<<3);
-   if ( clip[2] + clip[3] < 0) mask |= (1<<4); /* match mesa clipplane numbering - for now */
-   if (-clip[2] + clip[3] < 0) mask |= (1<<5); /* match mesa clipplane numbering - for now */
+   if (clip_depth) {
+      if ( clip[2] + clip[3] < 0) mask |= (1<<4); /* match mesa clipplane numbering - for now */
+      if (-clip[2] + clip[3] < 0) mask |= (1<<5); /* match mesa clipplane numbering - for now */
+   }
 
    /* Followed by any remaining ones:
     */
@@ -102,6 +106,13 @@ static boolean post_vs_cliptest_viewport_gl( struct pt_post_vs *pvs,
    const unsigned pos = draw_current_shader_position_output(pvs->draw);
    unsigned clipped = 0;
    unsigned j;
+   /* Depth clamping takes place after polygon offset.
+    * We clamp in this function if polygon offset is disabled.
+    * Otherwise, clamping is done in the offset stage. */
+   boolean depth_clamp = pvs->draw->depth_clamp &&
+                         !pvs->draw->rasterizer->offset_point &&
+                         !pvs->draw->rasterizer->offset_line &&
+                         !pvs->draw->rasterizer->offset_tri;
 
    if (0) debug_printf("%s count, %d\n", __FUNCTION__, info->count);
 
@@ -120,9 +131,11 @@ static boolean post_vs_cliptest_viewport_gl( struct pt_post_vs *pvs,
       out->clip[3] = position[3];
 
       out->vertex_id = 0xffff;
+      /* Disable depth clipping if depth clamping is enabled. */
       out->clipmask = compute_clipmask_gl(out->clip, 
 					  pvs->draw->plane,
-					  pvs->draw->nr_planes);
+                                          pvs->draw->nr_planes,
+                                          !pvs->draw->depth_clamp);
       clipped += out->clipmask;
 
       if (out->clipmask == 0)
@@ -135,6 +148,10 @@ static boolean post_vs_cliptest_viewport_gl( struct pt_post_vs *pvs,
 	 position[1] = position[1] * w * scale[1] + trans[1];
 	 position[2] = position[2] * w * scale[2] + trans[2];
 	 position[3] = w;
+
+         if (depth_clamp) {
+            position[2] = CLAMP(position[2], 0.0f, 1.0f);
+         }
 #if 0
          debug_printf("post viewport: %f %f %f %f\n",
                       position[0],
