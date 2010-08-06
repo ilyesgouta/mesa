@@ -296,6 +296,7 @@ util_blit_pixels_writemask(struct blit_state *ctx,
    unsigned offset;
    boolean overlap;
    float s0, t0, s1, t1;
+   boolean normalized;
 
    assert(filter == PIPE_TEX_MIPFILTER_NEAREST ||
           filter == PIPE_TEX_MIPFILTER_LINEAR);
@@ -334,7 +335,6 @@ util_blit_pixels_writemask(struct blit_state *ctx,
                                  srcW, srcH);       /* size */
       return;
    }
-
 
    /* Create a temporary texture when src and dest alias or when src
     * is anything other than a 2d texture.
@@ -379,6 +379,8 @@ util_blit_pixels_writemask(struct blit_state *ctx,
       texTemp.height0 = srcH;
       texTemp.depth0 = 1;
       texTemp.bind = PIPE_BIND_SAMPLER_VIEW;
+      if(!util_is_pot(srcW) || !util_is_pot(srcH))
+         texTemp.flags |= PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT;
 
       tex = screen->resource_create(screen, &texTemp);
       if (!tex)
@@ -392,10 +394,19 @@ util_blit_pixels_writemask(struct blit_state *ctx,
                                  src_tex, srcsub, srcLeft, srcTop, srcZ0, /* src */
                                  srcW, srcH);     /* size */
 
-      s0 = 0.0f; 
-      s1 = 1.0f;
-      t0 = 0.0f;
-      t1 = 1.0f;
+      normalized = !(tex->flags & PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT);
+      if(normalized) {
+         s0 = 0.0f;
+         s1 = 1.0f;
+         t0 = 0.0f;
+         t1 = 1.0f;
+      }
+      else {
+         s0 = 0;
+         s1 = srcW;
+         t0 = 0;
+         t1 = srcH;
+      }
 
       u_sampler_view_default_template(&sv_templ, tex, tex->format);
       sampler_view = pipe->create_sampler_view(pipe, tex, &sv_templ);
@@ -415,10 +426,18 @@ util_blit_pixels_writemask(struct blit_state *ctx,
          return;
       }
 
-      s0 = srcX0 / (float)(u_minify(sampler_view->texture->width0, srcsub.level));
-      s1 = srcX1 / (float)(u_minify(sampler_view->texture->width0, srcsub.level));
-      t0 = srcY0 / (float)(u_minify(sampler_view->texture->height0, srcsub.level));
-      t1 = srcY1 / (float)(u_minify(sampler_view->texture->height0, srcsub.level));
+      s0 = srcX0;
+      s1 = srcX1;
+      t0 = srcY0;
+      t1 = srcY1;
+      normalized = !(sampler_view->texture->flags & PIPE_RESOURCE_FLAG_UNNORMALIZED_COORDS_HINT);
+      if(normalized)
+      {
+         s0 /= (float)(u_minify(sampler_view->texture->width0, srcsub.level));
+         s1 /= (float)(u_minify(sampler_view->texture->width0, srcsub.level));
+         t0 /= (float)(u_minify(sampler_view->texture->height0, srcsub.level));
+         t1 /= (float)(u_minify(sampler_view->texture->height0, srcsub.level));
+      }
    }
 
 
@@ -450,6 +469,7 @@ util_blit_pixels_writemask(struct blit_state *ctx,
    cso_set_vertex_elements(ctx->cso, 2, ctx->velem);
 
    /* sampler */
+   ctx->sampler.normalized_coords = normalized;
    ctx->sampler.min_img_filter = filter;
    ctx->sampler.mag_img_filter = filter;
    /* we've limited this already with the sampler view but you never know... */
