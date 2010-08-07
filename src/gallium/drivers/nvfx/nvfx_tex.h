@@ -1,6 +1,11 @@
 #ifndef NVFX_TEX_H_
 #define NVFX_TEX_H_
 
+#include "util/u_math.h"
+#include "pipe/p_defines.h"
+#include "pipe/p_state.h"
+#include <nouveau/nouveau_class.h>
+
 static inline unsigned
 nvfx_tex_wrap_mode(unsigned wrap) {
 	unsigned ret;
@@ -31,7 +36,7 @@ nvfx_tex_wrap_mode(unsigned wrap) {
 		ret = NV40TCL_TEX_WRAP_S_MIRROR_CLAMP;
 		break;
 	default:
-		NOUVEAU_ERR("unknown wrap mode: %d\n", wrap);
+		assert(0);
 		ret = NV34TCL_TX_WRAP_S_REPEAT;
 		break;
 	}
@@ -61,7 +66,7 @@ nvfx_tex_wrap_compare_mode(unsigned func)
 		return NV34TCL_TX_WRAP_RCOMP_ALWAYS;
 	default:
 		assert(0);
-		break;
+		return 0;
 	}
 }
 
@@ -126,7 +131,44 @@ struct nvfx_sampler_state {
 	uint32_t en;
 	uint32_t filt;
 	uint32_t bcol;
+	uint32_t min_lod;
+	uint32_t max_lod;
 	boolean compare;
 };
+
+struct nvfx_sampler_view {
+	struct pipe_sampler_view base;
+	int offset;
+	uint32_t swizzle;
+	uint32_t npot_size;
+	uint32_t filt;
+	uint32_t wrap;
+	uint32_t lod_offset;
+	uint32_t max_lod_limit;
+	union
+	{
+		struct
+		{
+			uint32_t fmt[4]; /* nv30 has 4 entries, nv40 one */
+			int rect;
+		} nv30;
+		struct
+		{
+			uint32_t fmt[2]; /* nv30 has 4 entries, nv40 one */
+			uint32_t npot_size2; /* nv40 only */
+		} nv40;
+		uint32_t init_fmt;
+	} u;
+};
+
+struct nvfx_texture_format {
+	int fmt[6];
+	unsigned sign;
+	unsigned wrap;
+	unsigned char src[6];
+	unsigned char comp[6];
+};
+
+extern struct nvfx_texture_format nvfx_texture_formats[PIPE_FORMAT_COUNT];
 
 #endif /* NVFX_TEX_H_ */
