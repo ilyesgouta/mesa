@@ -34,44 +34,55 @@ nv30_sampler_state_init(struct pipe_context *pipe,
 	}
 }
 
-#define _(m,tf,ts0x,ts0y,ts0z,ts0w,ts1x,ts1y,ts1z,ts1w)                        \
+#define FMT_FLAG_DEPTH 1
+
+#define _(m,tf,ts0x,ts0y,ts0z,ts0w,ts1x,ts1y,ts1z,ts1w,f)                        \
 [PIPE_FORMAT_##m] = {                                                                              \
   NV34TCL_TX_FORMAT_FORMAT_##tf,                                               \
   NV34TCL_TX_FORMAT_FORMAT_##tf##_RECT,                                               \
   (NV34TCL_TX_SWIZZLE_S0_X_##ts0x | NV34TCL_TX_SWIZZLE_S0_Y_##ts0y |           \
    NV34TCL_TX_SWIZZLE_S0_Z_##ts0z | NV34TCL_TX_SWIZZLE_S0_W_##ts0w |           \
    NV34TCL_TX_SWIZZLE_S1_X_##ts1x | NV34TCL_TX_SWIZZLE_S1_Y_##ts1y |           \
-   NV34TCL_TX_SWIZZLE_S1_Z_##ts1z | NV34TCL_TX_SWIZZLE_S1_W_##ts1w)            \
+   NV34TCL_TX_SWIZZLE_S1_Z_##ts1z | NV34TCL_TX_SWIZZLE_S1_W_##ts1w),           \
+   f \
 }
 
 struct nv30_texture_format {
 	int     format;
 	int     rect_format;
 	int     swizzle;
+	unsigned flags;
 };
 
 #define NV34TCL_TX_FORMAT_FORMAT_DXT1_RECT NV34TCL_TX_FORMAT_FORMAT_DXT1
 #define NV34TCL_TX_FORMAT_FORMAT_DXT3_RECT NV34TCL_TX_FORMAT_FORMAT_DXT3
 #define NV34TCL_TX_FORMAT_FORMAT_DXT5_RECT NV34TCL_TX_FORMAT_FORMAT_DXT5
 
+#define NV34TCL_TX_FORMAT_FORMAT_Z24 0x2a00
+#define NV34TCL_TX_FORMAT_FORMAT_Z16 0x2c00
+
+// XXX: this is an untested guess, find the right values
+#define NV34TCL_TX_FORMAT_FORMAT_Z24_RECT 0x2b00
+#define NV34TCL_TX_FORMAT_FORMAT_Z16_RECT 0x2d00
+
 static struct nv30_texture_format
 nv30_texture_formats[PIPE_FORMAT_COUNT] = {
 	[0 ... PIPE_FORMAT_COUNT - 1] = {-1, 0, 0},
-	_(B8G8R8X8_UNORM, A8R8G8B8,   S1,   S1,   S1,  ONE, X, Y, Z, W),
-	_(B8G8R8A8_UNORM, A8R8G8B8,   S1,   S1,   S1,   S1, X, Y, Z, W),
-	_(B5G5R5A1_UNORM, A1R5G5B5,   S1,   S1,   S1,   S1, X, Y, Z, W),
-	_(B4G4R4A4_UNORM, A4R4G4B4,   S1,   S1,   S1,   S1, X, Y, Z, W),
-	_(B5G6R5_UNORM  , R5G6B5  ,   S1,   S1,   S1,  ONE, X, Y, Z, W),
-	_(L8_UNORM      , L8      ,   S1,   S1,   S1,  ONE, X, X, X, X),
-	_(A8_UNORM      , L8      , ZERO, ZERO, ZERO,   S1, X, X, X, X),
-	_(I8_UNORM      , L8      ,   S1,   S1,   S1,   S1, X, X, X, X),
-	_(L8A8_UNORM    , A8L8    ,   S1,   S1,   S1,   S1, X, X, X, Y),
-	_(Z16_UNORM     , R5G6B5  ,   S1,   S1,   S1,  ONE, X, X, X, X),
-	_(S8_USCALED_Z24_UNORM   , A8R8G8B8,   S1,   S1,   S1,  ONE, X, X, X, X),
-	_(DXT1_RGB      , DXT1    ,   S1,   S1,   S1,  ONE, X, Y, Z, W),
-	_(DXT1_RGBA     , DXT1    ,   S1,   S1,   S1,   S1, X, Y, Z, W),
-	_(DXT3_RGBA     , DXT3    ,   S1,   S1,   S1,   S1, X, Y, Z, W),
-	_(DXT5_RGBA     , DXT5    ,   S1,   S1,   S1,   S1, X, Y, Z, W),
+	_(B8G8R8X8_UNORM, A8R8G8B8,   S1,   S1,   S1,  ONE, X, Y, Z, W, 0),
+	_(B8G8R8A8_UNORM, A8R8G8B8,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
+	_(B5G5R5A1_UNORM, A1R5G5B5,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
+	_(B4G4R4A4_UNORM, A4R4G4B4,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
+	_(B5G6R5_UNORM  , R5G6B5  ,   S1,   S1,   S1,  ONE, X, Y, Z, W, 0),
+	_(L8_UNORM      , L8      ,   S1,   S1,   S1,  ONE, X, X, X, X, 0),
+	_(A8_UNORM      , L8      , ZERO, ZERO, ZERO,   S1, X, X, X, X, 0),
+	_(I8_UNORM      , L8      ,   S1,   S1,   S1,   S1, X, X, X, X, 0),
+	_(L8A8_UNORM    , A8L8    ,   S1,   S1,   S1,   S1, X, X, X, Y, 0),
+	_(Z16_UNORM     , Z16     ,   S1,   S1,   S1,  ONE, W, W, W, W, FMT_FLAG_DEPTH),
+	_(S8_USCALED_Z24_UNORM,Z24,   S1,   S1,   S1,  ONE, W, W, W, W, FMT_FLAG_DEPTH),
+	_(DXT1_RGB      , DXT1    ,   S1,   S1,   S1,  ONE, X, Y, Z, W, 0),
+	_(DXT1_RGBA     , DXT1    ,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
+	_(DXT3_RGBA     , DXT3    ,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
+	_(DXT5_RGBA     , DXT5    ,   S1,   S1,   S1,   S1, X, Y, Z, W, 0),
 	{},
 };
 
@@ -113,6 +124,33 @@ nv30_fragtex_set(struct nvfx_context *nvfx, int unit)
 	}
 
 	txf = use_rect ? tf->rect_format : tf->format;
+	txs = tf->swizzle;
+	if((tf->flags & FMT_FLAG_DEPTH) && !ps->compare)
+	{
+		/* This works by reading the depth value most significant 8/16 bits.
+		 * We are losing precision, but nVidia loses even more by using A8R8G8B8 instead of HILO16
+		 * There is no 32-bit integer texture support, so other things are infeasible.
+		 *
+		 * TODO: is it possible to read 16 bits for Z16? A16 doesn't seem to work, either due to normalization or endianness issues
+		 */
+		switch(txf)
+		{
+		case NV34TCL_TX_FORMAT_FORMAT_Z24:
+			txf = NV34TCL_TX_FORMAT_FORMAT_HILO16;
+			break;
+		case NV34TCL_TX_FORMAT_FORMAT_Z24_RECT:
+			txf = NV34TCL_TX_FORMAT_FORMAT_HILO16_RECT;
+			break;
+		case NV34TCL_TX_FORMAT_FORMAT_Z16:
+			txf = NV34TCL_TX_FORMAT_FORMAT_A8L8;
+			break;
+		case NV34TCL_TX_FORMAT_FORMAT_Z16_RECT:
+			txf = NV34TCL_TX_FORMAT_FORMAT_A8L8_RECT;
+			break;
+		default:
+			assert(0);
+		}
+	}
 	txf |= ((pt->last_level>0) ? NV34TCL_TX_FORMAT_MIPMAP : 0);
 	txf |= log2i(pt->width0) << NV34TCL_TX_FORMAT_BASE_SIZE_U_SHIFT;
 	txf |= log2i(pt->height0) << NV34TCL_TX_FORMAT_BASE_SIZE_V_SHIFT;
@@ -136,8 +174,6 @@ nv30_fragtex_set(struct nvfx_context *nvfx, int unit)
 		NOUVEAU_ERR("Unknown target %d\n", pt->target);
 		return;
 	}
-
-	txs = tf->swizzle;
 
 	if(use_rect)
 		txs |= nvfx_subresource_pitch(&mt->base, 0) << NV34TCL_TX_SWIZZLE_RECT_PITCH_SHIFT;

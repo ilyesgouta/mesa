@@ -96,8 +96,14 @@ nvfx_sampler_state_create(struct pipe_context *pipe,
 	ps->filt = nvfx_tex_filter(cso);
 	ps->wrap = (nvfx_tex_wrap_mode(cso->wrap_s) << NV34TCL_TX_WRAP_S_SHIFT) |
 		    (nvfx_tex_wrap_mode(cso->wrap_t) << NV34TCL_TX_WRAP_T_SHIFT) |
-		    (nvfx_tex_wrap_mode(cso->wrap_r) << NV34TCL_TX_WRAP_R_SHIFT) |
-		    nvfx_tex_wrap_compare_mode(cso);
+		    (nvfx_tex_wrap_mode(cso->wrap_r) << NV34TCL_TX_WRAP_R_SHIFT);
+	ps->compare = FALSE;
+
+	if(cso->compare_mode == PIPE_TEX_COMPARE_R_TO_TEXTURE)
+	{
+		ps->wrap |= nvfx_tex_wrap_compare_mode(cso->compare_func);
+		ps->compare = TRUE;
+	}
 	ps->bcol = nvfx_tex_border_color(cso->border_color);
 
 	if(nvfx->is_nv4x)

@@ -40,31 +40,29 @@ nvfx_tex_wrap_mode(unsigned wrap) {
 }
 
 static inline unsigned
-nvfx_tex_wrap_compare_mode(const struct pipe_sampler_state* cso)
+nvfx_tex_wrap_compare_mode(unsigned func)
 {
-	if (cso->compare_mode == PIPE_TEX_COMPARE_R_TO_TEXTURE) {
-		switch (cso->compare_func) {
-		case PIPE_FUNC_NEVER:
-			return NV34TCL_TX_WRAP_RCOMP_NEVER;
-		case PIPE_FUNC_GREATER:
-			return NV34TCL_TX_WRAP_RCOMP_GREATER;
-		case PIPE_FUNC_EQUAL:
-			return NV34TCL_TX_WRAP_RCOMP_EQUAL;
-		case PIPE_FUNC_GEQUAL:
-			return NV34TCL_TX_WRAP_RCOMP_GEQUAL;
-		case PIPE_FUNC_LESS:
-			return NV34TCL_TX_WRAP_RCOMP_LESS;
-		case PIPE_FUNC_NOTEQUAL:
-			return NV34TCL_TX_WRAP_RCOMP_NOTEQUAL;
-		case PIPE_FUNC_LEQUAL:
-			return NV34TCL_TX_WRAP_RCOMP_LEQUAL;
-		case PIPE_FUNC_ALWAYS:
-			return NV34TCL_TX_WRAP_RCOMP_ALWAYS;
-		default:
-			break;
-		}
+	switch (func) {
+	case PIPE_FUNC_NEVER:
+		return NV34TCL_TX_WRAP_RCOMP_NEVER;
+	case PIPE_FUNC_GREATER:
+		return NV34TCL_TX_WRAP_RCOMP_GREATER;
+	case PIPE_FUNC_EQUAL:
+		return NV34TCL_TX_WRAP_RCOMP_EQUAL;
+	case PIPE_FUNC_GEQUAL:
+		return NV34TCL_TX_WRAP_RCOMP_GEQUAL;
+	case PIPE_FUNC_LESS:
+		return NV34TCL_TX_WRAP_RCOMP_LESS;
+	case PIPE_FUNC_NOTEQUAL:
+		return NV34TCL_TX_WRAP_RCOMP_NOTEQUAL;
+	case PIPE_FUNC_LEQUAL:
+		return NV34TCL_TX_WRAP_RCOMP_LEQUAL;
+	case PIPE_FUNC_ALWAYS:
+		return NV34TCL_TX_WRAP_RCOMP_ALWAYS;
+	default:
+		assert(0);
+		break;
 	}
-	return 0;
 }
 
 static inline unsigned nvfx_tex_filter(const struct pipe_sampler_state* cso)
@@ -128,6 +126,7 @@ struct nvfx_sampler_state {
 	uint32_t en;
 	uint32_t filt;
 	uint32_t bcol;
+	boolean compare;
 };
 
 #endif /* NVFX_TEX_H_ */
