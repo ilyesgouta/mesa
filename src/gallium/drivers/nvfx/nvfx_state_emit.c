@@ -8,6 +8,7 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 {
 	struct nouveau_channel* chan = nvfx->screen->base.channel;
 	unsigned dirty;
+	unsigned still_dirty = 0;
 	int all_swizzled = -1;
 	boolean flush_tex_cache = FALSE;
 
@@ -49,10 +50,18 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 				return FALSE;
 		}
 
-		if(dirty & (NVFX_NEW_ARRAYS))
+		if(dirty & NVFX_NEW_ARRAYS)
 		{
 			if(!nvfx_vbo_validate(nvfx))
 				return FALSE;
+		}
+
+		if(dirty & NVFX_NEW_INDEX)
+		{
+			if(nvfx->use_index_buffer)
+				nvfx_idxbuf_validate(nvfx);
+			else
+				still_dirty = NVFX_NEW_INDEX;
 		}
 	}
 	else
@@ -61,7 +70,7 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 		if(dirty & (NVFX_NEW_VERTPROG | NVFX_NEW_UCP))
 			nvfx_vertprog_validate(nvfx);
 
-		if(dirty & (NVFX_NEW_ARRAYS | NVFX_NEW_FRAGPROG))
+		if(dirty & (NVFX_NEW_ARRAYS | NVFX_NEW_INDEX | NVFX_NEW_FRAGPROG))
 			nvfx_vtxfmt_validate(nvfx);
 	}
 
@@ -115,7 +124,24 @@ nvfx_state_validate_common(struct nvfx_context *nvfx)
 			OUT_RING(chan, 1);
 		}
 	}
-	nvfx->dirty = 0;
+
+	nvfx->dirty = dirty & still_dirty;
+
+	unsigned render_temps = nvfx->state.render_temps;
+	if(render_temps)
+	{
+		for(int i = 0; i < nvfx->framebuffer.nr_cbufs; ++i)
+		{
+			if(render_temps & (1 << i))
+				util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.cbufs[i]),
+						(struct util_dirty_surface*)nvfx->framebuffer.cbufs[i]);
+		}
+
+		if(render_temps & 0x80)
+			util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.zsbuf),
+					(struct util_dirty_surface*)nvfx->framebuffer.zsbuf);
+	}
+
 	return TRUE;
 }
 
@@ -134,21 +160,6 @@ nvfx_state_emit(struct nvfx_context *nvfx)
 	      ;
 	MARK_RING(chan, max_relocs * 2, max_relocs * 2);
 	nvfx_state_relocate(nvfx);
-
-	unsigned render_temps = nvfx->state.render_temps;
-	if(render_temps)
-	{
-		for(int i = 0; i < nvfx->framebuffer.nr_cbufs; ++i)
-		{
-			if(render_temps & (1 << i))
-				util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.cbufs[i]),
-						(struct util_dirty_surface*)nvfx->framebuffer.cbufs[i]);
-		}
-
-		if(render_temps & 0x80)
-			util_dirty_surface_set_dirty(nvfx_surface_get_dirty_surfaces(nvfx->framebuffer.zsbuf),
-					(struct util_dirty_surface*)nvfx->framebuffer.zsbuf);
-	}
 }
 
 void
@@ -158,7 +169,11 @@ nvfx_state_relocate(struct nvfx_context *nvfx)
 	nvfx_fragtex_relocate(nvfx);
 	nvfx_fragprog_relocate(nvfx);
 	if (nvfx->render_mode == HW)
+	{
 		nvfx_vbo_relocate(nvfx);
+		if(nvfx->use_index_buffer)
+			nvfx_idxbuf_relocate(nvfx);
+	}
 }
 
 boolean
@@ -219,8 +234,10 @@ nvfx_state_validate_swtnl(struct nvfx_context *nvfx)
 		draw_set_viewport_state(draw, &nvfx->viewport);
 
 	if (nvfx->draw_dirty & NVFX_NEW_ARRAYS) {
+#warning BROKEN
+		struct pipe_vertex_element ve[16];
 		draw_set_vertex_buffers(draw, nvfx->vtxbuf_nr, nvfx->vtxbuf);
-		draw_set_vertex_elements(draw, nvfx->vtxelt->num_elements, nvfx->vtxelt->pipe);
+		draw_set_vertex_elements(draw, nvfx->vtxelt->num_elements, ve);
 	}
 
 	nvfx_state_validate_common(nvfx);

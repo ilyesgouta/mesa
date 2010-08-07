@@ -39,30 +39,21 @@ nvfx_render_vertex(struct nvfx_context *nvfx, const struct vertex_header *v)
 		unsigned idx = nvfx->swtnl.draw[i];
 		unsigned hw = nvfx->swtnl.hw[i];
 
+		WAIT_RING(chan, 5);
 		switch (nvfx->swtnl.emit[i]) {
 		case EMIT_OMIT:
 			break;
 		case EMIT_1F:
-			BEGIN_RING(chan, eng3d, NV34TCL_VTX_ATTR_1F(hw), 1);
-			OUT_RING  (chan, fui(v->data[idx][0]));
+			nvfx_emit_vtx_attr(chan, hw, v->data[idx], 1);
 			break;
 		case EMIT_2F:
-			BEGIN_RING(chan, eng3d, NV34TCL_VTX_ATTR_2F_X(hw), 2);
-			OUT_RING  (chan, fui(v->data[idx][0]));
-			OUT_RING  (chan, fui(v->data[idx][1]));
+			nvfx_emit_vtx_attr(chan, hw, v->data[idx], 2);
 			break;
 		case EMIT_3F:
-			BEGIN_RING(chan, eng3d, NV34TCL_VTX_ATTR_3F_X(hw), 3);
-			OUT_RING  (chan, fui(v->data[idx][0]));
-			OUT_RING  (chan, fui(v->data[idx][1]));
-			OUT_RING  (chan, fui(v->data[idx][2]));
+			nvfx_emit_vtx_attr(chan, hw, v->data[idx], 3);
 			break;
 		case EMIT_4F:
-			BEGIN_RING(chan, eng3d, NV34TCL_VTX_ATTR_4F_X(hw), 4);
-			OUT_RING  (chan, fui(v->data[idx][0]));
-			OUT_RING  (chan, fui(v->data[idx][1]));
-			OUT_RING  (chan, fui(v->data[idx][2]));
-			OUT_RING  (chan, fui(v->data[idx][3]));
+			nvfx_emit_vtx_attr(chan, hw, v->data[idx], 4);
 			break;
 		case 0xff:
 			BEGIN_RING(chan, eng3d, NV34TCL_VTX_ATTR_4F_X(hw), 4);
@@ -231,10 +222,7 @@ nvfx_draw_render_stage(struct nvfx_context *nvfx)
 }
 
 void
-nvfx_draw_elements_swtnl(struct pipe_context *pipe,
-			 struct pipe_resource *idxbuf,
-			 unsigned idxbuf_size, int idxbuf_bias,
-			 unsigned mode, unsigned start, unsigned count)
+nvfx_draw_vbo_swtnl(struct pipe_context *pipe, const struct pipe_draw_info* info)
 {
 	struct nvfx_context *nvfx = nvfx_context(pipe);
 	struct pipe_transfer *vb_transfer[PIPE_MAX_ATTRIBS];
@@ -254,11 +242,11 @@ nvfx_draw_elements_swtnl(struct pipe_context *pipe,
 		draw_set_mapped_vertex_buffer(nvfx->draw, i, map);
 	}
 
-	if (idxbuf) {
-		map = pipe_buffer_map(pipe, idxbuf,
+	if (info->indexed) {
+		map = pipe_buffer_map(pipe, nvfx->idxbuf.buffer,
 				      PIPE_TRANSFER_READ,
 				      &ib_transfer);
-		draw_set_mapped_element_buffer(nvfx->draw, idxbuf_size, idxbuf_bias, map);
+		draw_set_mapped_element_buffer(nvfx->draw, nvfx->idxbuf.index_size, info->index_bias, map);
 	} else {
 		draw_set_mapped_element_buffer(nvfx->draw, 0, 0, NULL);
 	}
@@ -274,20 +262,19 @@ nvfx_draw_elements_swtnl(struct pipe_context *pipe,
                                                 map, nr);
 	}
 
-	draw_arrays(nvfx->draw, mode, start, count);
+	draw_arrays_instanced(nvfx->draw, info->mode, info->start, info->count, info->start_instance, info->instance_count);
 
 	for (i = 0; i < nvfx->vtxbuf_nr; i++)
 		pipe_buffer_unmap(pipe, nvfx->vtxbuf[i].buffer, vb_transfer[i]);
 
-	if (idxbuf)
-		pipe_buffer_unmap(pipe, idxbuf, ib_transfer);
+	if (nvfx->idxbuf.buffer)
+		pipe_buffer_unmap(pipe, nvfx->idxbuf.buffer, ib_transfer);
 
 	if (nvfx->constbuf[PIPE_SHADER_VERTEX])
 		pipe_buffer_unmap(pipe, nvfx->constbuf[PIPE_SHADER_VERTEX],
 				  cb_transfer);
 
 	draw_flush(nvfx->draw);
-	pipe->flush(pipe, 0, NULL);
 }
 
 static INLINE void
