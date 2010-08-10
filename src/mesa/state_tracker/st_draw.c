@@ -388,7 +388,7 @@ setup_interleaved_attribs(GLcontext *ctx,
 
       velements[attr].src_offset =
          (unsigned) (arrays[mesaAttr]->Ptr - offset0);
-      velements[attr].instance_divisor = 0;
+      velements[attr].instance_divisor = stride ? 0 : ~0;
       velements[attr].vertex_buffer_index = 0;
       velements[attr].src_format =
          st_pipe_vertex_format(arrays[mesaAttr]->Type,
@@ -483,7 +483,7 @@ setup_non_interleaved_attribs(GLcontext *ctx,
       /* common-case setup */
       vbuffer[attr].stride = stride; /* in bytes */
       vbuffer[attr].max_index = max_index;
-      velements[attr].instance_divisor = 0;
+      velements[attr].instance_divisor = stride ? 0 : ~0;
       velements[attr].vertex_buffer_index = attr;
       velements[attr].src_format
          = st_pipe_vertex_format(arrays[mesaAttr]->Type,
