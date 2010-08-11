@@ -72,8 +72,8 @@ compute_version(GLcontext *ctx)
                               ctx->Extensions.ARB_shader_objects &&
                               ctx->Extensions.ARB_vertex_shader &&
                               ctx->Extensions.ARB_fragment_shader &&
-                              ctx->Extensions.ARB_texture_non_power_of_two &&
-                              ctx->Extensions.EXT_blend_equation_separate &&
+//                              ctx->Extensions.ARB_texture_non_power_of_two &&
+//                              ctx->Extensions.EXT_blend_equation_separate &&
 
 			      /* Technically, 2.0 requires the functionality
 			       * of the EXT version.  Enable 2.0 if either
