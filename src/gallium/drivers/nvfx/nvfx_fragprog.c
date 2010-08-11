@@ -10,6 +10,7 @@
 
 #include "nvfx_context.h"
 #include "nvfx_shader.h"
+#include "nvfx_resource.h"
 
 #define MAX_CONSTS 128
 #define MAX_IMM 32
@@ -977,10 +978,8 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 
 		if(nvfx->constbuf[PIPE_SHADER_FRAGMENT]) {
 			struct pipe_resource* constbuf = nvfx->constbuf[PIPE_SHADER_FRAGMENT];
-			// TODO: avoid using transfers, just directly the buffer
-			struct pipe_transfer* transfer;
 			// TODO: does this check make any sense, or should we do this unconditionally?
-			uint32_t* map = pipe_buffer_map(&nvfx->pipe, constbuf, PIPE_TRANSFER_READ, &transfer);
+			uint32_t* map = nvfx_buffer(constbuf)->data;
 			uint32_t* buf = (uint32_t*)((char*)fp->fpbo->insn + offset);
 			int i;
 			for (i = 0; i < fp->nr_consts; ++i) {
@@ -993,7 +992,6 @@ nvfx_fragprog_validate(struct nvfx_context *nvfx)
 					nvfx_fp_memcpy(&fpmap[off], &map[idx], 4 * sizeof(uint32_t));
 				}
 			}
-			pipe_buffer_unmap(&nvfx->pipe, constbuf, transfer);
 		}
 
 		if(fp->progs_left_with_obsolete_slot_assignments) {

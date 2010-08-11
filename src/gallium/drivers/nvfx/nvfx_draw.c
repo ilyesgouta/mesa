@@ -9,6 +9,7 @@
 #include "draw/draw_pipe.h"
 
 #include "nvfx_context.h"
+#include "nvfx_resource.h"
 
 /* Simple, but crappy, swtnl path, hopefully we wont need to hit this very
  * often at all.  Uses "quadro style" vertex submission + a fixed vertex
@@ -225,9 +226,6 @@ void
 nvfx_draw_vbo_swtnl(struct pipe_context *pipe, const struct pipe_draw_info* info)
 {
 	struct nvfx_context *nvfx = nvfx_context(pipe);
-	struct pipe_transfer *vb_transfer[PIPE_MAX_ATTRIBS];
-	struct pipe_transfer *ib_transfer = NULL;
-	struct pipe_transfer *cb_transfer = NULL;
 	unsigned i;
 	void *map;
 
@@ -236,16 +234,12 @@ nvfx_draw_vbo_swtnl(struct pipe_context *pipe, const struct pipe_draw_info* info
 	nvfx_state_emit(nvfx);
 
 	for (i = 0; i < nvfx->vtxbuf_nr; i++) {
-		map = pipe_buffer_map(pipe, nvfx->vtxbuf[i].buffer,
-                                      PIPE_TRANSFER_READ,
-				      &vb_transfer[i]);
+		map = nvfx_buffer(nvfx->vtxbuf[i].buffer)->data + nvfx->vtxbuf[i].buffer_offset;
 		draw_set_mapped_vertex_buffer(nvfx->draw, i, map);
 	}
 
 	if (info->indexed) {
-		map = pipe_buffer_map(pipe, nvfx->idxbuf.buffer,
-				      PIPE_TRANSFER_READ,
-				      &ib_transfer);
+		map = nvfx_buffer(nvfx->idxbuf.buffer)->data + nvfx->idxbuf.offset;
 		draw_set_mapped_element_buffer(nvfx->draw, nvfx->idxbuf.index_size, info->index_bias, map);
 	} else {
 		draw_set_mapped_element_buffer(nvfx->draw, 0, 0, NULL);
@@ -254,25 +248,12 @@ nvfx_draw_vbo_swtnl(struct pipe_context *pipe, const struct pipe_draw_info* info
 	if (nvfx->constbuf[PIPE_SHADER_VERTEX]) {
 		const unsigned nr = nvfx->constbuf_nr[PIPE_SHADER_VERTEX];
 
-		map = pipe_buffer_map(pipe,
-				      nvfx->constbuf[PIPE_SHADER_VERTEX],
-				      PIPE_TRANSFER_READ,
-				      &cb_transfer);
+		map = nvfx_buffer(nvfx->constbuf[PIPE_SHADER_VERTEX])->data;
 		draw_set_mapped_constant_buffer(nvfx->draw, PIPE_SHADER_VERTEX, 0,
                                                 map, nr);
 	}
 
 	draw_arrays_instanced(nvfx->draw, info->mode, info->start, info->count, info->start_instance, info->instance_count);
-
-	for (i = 0; i < nvfx->vtxbuf_nr; i++)
-		pipe_buffer_unmap(pipe, nvfx->vtxbuf[i].buffer, vb_transfer[i]);
-
-	if (nvfx->idxbuf.buffer)
-		pipe_buffer_unmap(pipe, nvfx->idxbuf.buffer, ib_transfer);
-
-	if (nvfx->constbuf[PIPE_SHADER_VERTEX])
-		pipe_buffer_unmap(pipe, nvfx->constbuf[PIPE_SHADER_VERTEX],
-				  cb_transfer);
 
 	draw_flush(nvfx->draw);
 }
