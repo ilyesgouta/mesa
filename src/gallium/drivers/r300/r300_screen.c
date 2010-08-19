@@ -169,7 +169,8 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
         case PIPE_CAP_MAX_FS_TEX_INDIRECTIONS:
             return is_r500 ? 511 : 4;
         case PIPE_CAP_MAX_FS_CONTROL_FLOW_DEPTH:
-            return is_r500 ? 64 : 0; /* Actually unlimited on r500. */
+            /* it is actually 0, but we for now don't enable the GLSL2 if-to-cond pass */
+            return is_r500 ? 64 : 1; /* Actually unlimited on r500. */
         case PIPE_CAP_MAX_FS_INPUTS:
             /* 2 colors + 8 texcoords are always supported
              * (minus fog and wpos).
@@ -195,7 +196,8 @@ static int r300_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
         case PIPE_CAP_MAX_VS_TEX_INDIRECTIONS:
             return 0;
         case PIPE_CAP_MAX_VS_CONTROL_FLOW_DEPTH:
-            return is_r500 ? 4 : 0; /* For loops; not sure about conditionals. */
+            /* it is actually 0, but we for now don't enable the GLSL2 if-to-cond pass */
+            return is_r500 ? 4 : 1; /* For loops; not sure about conditionals. */
         case PIPE_CAP_MAX_VS_INPUTS:
             return 16;
         case PIPE_CAP_MAX_VS_CONSTS:

@@ -139,6 +139,11 @@ void st_init_limits(struct st_context *st)
    st->ctx->Shader.EmitContReturn =
       screen->get_param(screen, PIPE_CAP_TGSI_CONT_SUPPORTED);
 
+   /* XXX this should differ for VS and FS! */
+   st->ctx->Shader.EmitNoIfs =
+      !screen->get_param(screen, PIPE_CAP_MAX_VS_CONTROL_FLOW_DEPTH)
+      || !screen->get_param(screen, PIPE_CAP_MAX_FS_CONTROL_FLOW_DEPTH);
+
    /* Quads always follow GL provoking rules. */
    c->QuadsFollowProvokingVertexConvention = GL_FALSE;
 
