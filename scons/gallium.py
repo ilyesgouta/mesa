@@ -289,8 +289,21 @@ def generate(env):
             'PTHREADS',
             'HAVE_POSIX_MEMALIGN',
         ]
-    if env['platform'] == 'darwin':
-        cppdefines += ['_DARWIN_C_SOURCE']
+        if env['platform'] == 'darwin':
+            cppdefines += [
+                '_DARWIN_C_SOURCE',
+                'GLX_USE_APPLEGL',
+                'GLX_DIRECT_RENDERING',
+            ]
+        else:
+            cppdefines += [
+                'GLX_DIRECT_RENDERING',
+                'GLX_INDIRECT_RENDERING',
+            ]
+        if env['platform'] in ('linux', 'freebsd'):
+            cppdefines += ['HAVE_ALIAS']
+        else:
+            cppdefines += ['GLX_ALIAS_UNSUPPORTED']
     if platform == 'windows':
         cppdefines += [
             'WIN32',
@@ -381,6 +394,8 @@ def generate(env):
             ccflags += ['-O0']
         else:
             ccflags += ['-O3']
+        # Work around aliasing bugs - developers should comment this out
+        ccflags += ['-fno-strict-aliasing']
         ccflags += ['-g3']
         if env['build'] in ('checked', 'profile'):
             # See http://code.google.com/p/jrfonseca/wiki/Gprof2Dot#Which_options_should_I_pass_to_gcc_when_compiling_for_profiling?
@@ -437,10 +452,10 @@ def generate(env):
             ]
         if distutils.version.LooseVersion(ccversion) >= distutils.version.LooseVersion('4.2'):
             ccflags += [
-                '-Werror=pointer-arith',
+                '-Wpointer-arith',
             ]
             cflags += [
-                '-Werror=declaration-after-statement',
+                '-Wdeclaration-after-statement',
             ]
     if msvc:
         # See also:
