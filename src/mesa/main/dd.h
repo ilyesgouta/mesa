@@ -1153,6 +1153,14 @@ typedef struct {
                                             GLenum type, const GLvoid *indices,
                                             GLsizei primcount, GLint basevertex);
    void (GLAPIENTRYP DrawTransformFeedback)(GLenum mode, GLuint name);
+   void (GLAPIENTRYP DrawTransformFeedbackStream)(GLenum mode, GLuint name,
+                                                  GLuint stream);
+   void (GLAPIENTRYP DrawTransformFeedbackInstanced)(GLenum mode, GLuint name,
+                                                     GLsizei primcount);
+   void (GLAPIENTRYP DrawTransformFeedbackStreamInstanced)(GLenum mode,
+                                                           GLuint name,
+                                                           GLuint stream,
+                                                           GLsizei primcount);
    /*@}*/
 
    /**
