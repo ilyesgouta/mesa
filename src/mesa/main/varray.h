@@ -250,6 +250,17 @@ _mesa_DrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end,
 extern void GLAPIENTRY
 _mesa_DrawTransformFeedback(GLenum mode, GLuint name);
 
+extern void GLAPIENTRY
+_mesa_DrawTransformFeedbackStream(GLenum mode, GLuint name, GLuint stream);
+
+extern void GLAPIENTRY
+_mesa_DrawTransformFeedbackInstanced(GLenum mode, GLuint name,
+				     GLsizei primcount);
+
+extern void GLAPIENTRY
+_mesa_DrawTransformFeedbackStreamInstanced(GLenum mode, GLuint name,
+					   GLuint stream, GLsizei primcount);
+
 #endif
 
 extern void GLAPIENTRY

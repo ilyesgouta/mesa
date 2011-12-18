@@ -1254,7 +1254,7 @@ vbo_exec_MultiDrawElementsBaseVertex(GLenum mode,
 static void
 vbo_draw_transform_feedback(struct gl_context *ctx, GLenum mode,
                             struct gl_transform_feedback_object *obj,
-                            GLuint numInstances)
+                            GLuint stream, GLuint numInstances)
 {
    struct vbo_context *vbo = vbo_context(ctx);
    struct vbo_exec_context *exec = &vbo->exec;
@@ -1305,7 +1305,7 @@ vbo_exec_DrawTransformFeedback(GLenum mode, GLuint name)
       _mesa_debug(ctx, "glDrawTransformFeedback(%s, %d)\n",
                   _mesa_lookup_enum_by_nr(mode), name);
 
-   if (!_mesa_validate_DrawTransformFeedback(ctx, mode, obj)) {
+   if (!_mesa_validate_DrawTransformFeedback(ctx, mode, obj, 0, 1)) {
       return;
    }
 
@@ -1315,7 +1315,83 @@ vbo_exec_DrawTransformFeedback(GLenum mode, GLuint name)
       return;
    }
 
-   vbo_draw_transform_feedback(ctx, mode, obj, 1);
+   vbo_draw_transform_feedback(ctx, mode, obj, 0, 1);
+}
+
+static void GLAPIENTRY
+vbo_exec_DrawTransformFeedbackStream(GLenum mode, GLuint name, GLuint stream)
+{
+   GET_CURRENT_CONTEXT(ctx);
+   struct gl_transform_feedback_object *obj =
+      _mesa_lookup_transform_feedback_object(ctx, name);
+
+   if (MESA_VERBOSE & VERBOSE_DRAW)
+      _mesa_debug(ctx, "glDrawTransformFeedbackStream(%s, %u, %u)\n",
+                  _mesa_lookup_enum_by_nr(mode), name, stream);
+
+   if (!_mesa_validate_DrawTransformFeedback(ctx, mode, obj, stream, 1)) {
+      return;
+   }
+
+   FLUSH_CURRENT(ctx, 0);
+
+   if (!_mesa_valid_to_render(ctx, "glDrawTransformFeedbackStream")) {
+      return;
+   }
+
+   vbo_draw_transform_feedback(ctx, mode, obj, stream, 1);
+}
+
+static void GLAPIENTRY
+vbo_exec_DrawTransformFeedbackInstanced(GLenum mode, GLuint name,
+                                        GLsizei primcount)
+{
+   GET_CURRENT_CONTEXT(ctx);
+   struct gl_transform_feedback_object *obj =
+      _mesa_lookup_transform_feedback_object(ctx, name);
+
+   if (MESA_VERBOSE & VERBOSE_DRAW)
+      _mesa_debug(ctx, "glDrawTransformFeedbackInstanced(%s, %d)\n",
+                  _mesa_lookup_enum_by_nr(mode), name);
+
+   if (!_mesa_validate_DrawTransformFeedback(ctx, mode, obj, 0, primcount)) {
+      return;
+   }
+
+   FLUSH_CURRENT(ctx, 0);
+
+   if (!_mesa_valid_to_render(ctx, "glDrawTransformFeedbackInstanced")) {
+      return;
+   }
+
+   vbo_draw_transform_feedback(ctx, mode, obj, 0, 1);
+}
+
+static void GLAPIENTRY
+vbo_exec_DrawTransformFeedbackStreamInstanced(GLenum mode, GLuint name,
+                                              GLuint stream, GLsizei primcount)
+{
+   GET_CURRENT_CONTEXT(ctx);
+   struct gl_transform_feedback_object *obj =
+      _mesa_lookup_transform_feedback_object(ctx, name);
+
+   if (MESA_VERBOSE & VERBOSE_DRAW)
+      _mesa_debug(ctx, "glDrawTransformFeedbackStreamInstanced"
+                  "(%s, %u, %u, %i)\n",
+                  _mesa_lookup_enum_by_nr(mode), name, stream, primcount);
+
+   if (!_mesa_validate_DrawTransformFeedback(ctx, mode, obj, stream,
+                                             primcount)) {
+      return;
+   }
+
+   FLUSH_CURRENT(ctx, 0);
+
+   if (!_mesa_valid_to_render(ctx, "glDrawTransformFeedbackStreamInstanced")) {
+      return;
+   }
+
+   vbo_draw_transform_feedback(ctx, mode, obj, stream, primcount);
 }
 
 #endif
@@ -1339,6 +1415,12 @@ vbo_exec_array_init( struct vbo_exec_context *exec )
    exec->vtxfmt.DrawElementsInstancedBaseVertex = vbo_exec_DrawElementsInstancedBaseVertex;
 #if FEATURE_EXT_transform_feedback
    exec->vtxfmt.DrawTransformFeedback = vbo_exec_DrawTransformFeedback;
+   exec->vtxfmt.DrawTransformFeedbackStream =
+         vbo_exec_DrawTransformFeedbackStream;
+   exec->vtxfmt.DrawTransformFeedbackInstanced =
+         vbo_exec_DrawTransformFeedbackInstanced;
+   exec->vtxfmt.DrawTransformFeedbackStreamInstanced =
+         vbo_exec_DrawTransformFeedbackStreamInstanced;
 #endif
 }
 
@@ -1422,6 +1504,26 @@ void GLAPIENTRY
 _mesa_DrawTransformFeedback(GLenum mode, GLuint name)
 {
    vbo_exec_DrawTransformFeedback(mode, name);
+}
+
+void GLAPIENTRY
+_mesa_DrawTransformFeedbackStream(GLenum mode, GLuint name, GLuint stream)
+{
+   vbo_exec_DrawTransformFeedbackStream(mode, name, stream);
+}
+
+void GLAPIENTRY
+_mesa_DrawTransformFeedbackInstanced(GLenum mode, GLuint name,
+                                     GLsizei primcount)
+{
+   vbo_exec_DrawTransformFeedbackInstanced(mode, name, primcount);
+}
+
+void GLAPIENTRY
+_mesa_DrawTransformFeedbackStreamInstanced(GLenum mode, GLuint name,
+                                           GLuint stream, GLsizei primcount)
+{
+   vbo_exec_DrawTransformFeedbackStreamInstanced(mode, name, stream, primcount);
 }
 
 #endif
