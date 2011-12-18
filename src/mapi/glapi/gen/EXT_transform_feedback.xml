@@ -147,4 +147,22 @@
 
 </category>
 
+
+<category name="GL_ARB_transform_feedback_instanced" number="109">
+
+  <function name="DrawTransformFeedbackInstanced" offset="assign">
+    <param name="mode" type="GLenum"/>
+    <param name="id" type="GLuint"/>
+    <param name="primcount" type="GLsizei"/>
+  </function>
+
+  <function name="DrawTransformFeedbackStreamInstanced" offset="assign">
+    <param name="mode" type="GLenum"/>
+    <param name="id" type="GLuint"/>
+    <param name="stream" type="GLuint"/>
+    <param name="primcount" type="GLsizei"/>
+  </function>
+
+</category>
+
 </OpenGLAPI>
