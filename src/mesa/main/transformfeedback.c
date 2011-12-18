@@ -479,7 +479,7 @@ _mesa_BindBufferRange(GLenum target, GLuint index,
       return;
    }
 
-   if (index >= ctx->Const.MaxTransformFeedbackSeparateAttribs) {
+   if (index >= ctx->Const.MaxTransformFeedbackBuffers) {
       _mesa_error(ctx, GL_INVALID_VALUE, "glBindBufferRange(index=%d)", index);
       return;
    }
@@ -540,7 +540,7 @@ _mesa_BindBufferBase(GLenum target, GLuint index, GLuint buffer)
       return;
    }
 
-   if (index >= ctx->Const.MaxTransformFeedbackSeparateAttribs) {
+   if (index >= ctx->Const.MaxTransformFeedbackBuffers) {
       _mesa_error(ctx, GL_INVALID_VALUE, "glBindBufferBase(index=%d)", index);
       return;
    }
@@ -588,7 +588,7 @@ _mesa_BindBufferOffsetEXT(GLenum target, GLuint index, GLuint buffer,
       return;
    }
 
-   if (index >= ctx->Const.MaxTransformFeedbackSeparateAttribs) {
+   if (index >= ctx->Const.MaxTransformFeedbackBuffers) {
       _mesa_error(ctx, GL_INVALID_VALUE,
                   "glBindBufferOffsetEXT(index=%d)", index);
       return;
@@ -642,7 +642,7 @@ _mesa_TransformFeedbackVaryings(GLuint program, GLsizei count,
 
    if (count < 0 ||
        (bufferMode == GL_SEPARATE_ATTRIBS &&
-        (GLuint) count > ctx->Const.MaxTransformFeedbackSeparateAttribs)) {
+        (GLuint) count > ctx->Const.MaxTransformFeedbackBuffers)) {
       _mesa_error(ctx, GL_INVALID_VALUE,
                   "glTransformFeedbackVaryings(count=%d)", count);
       return;
