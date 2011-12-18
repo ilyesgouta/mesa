@@ -339,6 +339,7 @@ void st_init_extensions(struct st_context *st)
       { o(ARB_shadow),                       PIPE_CAP_TEXTURE_SHADOW_MAP               },
       { o(ARB_texture_non_power_of_two),     PIPE_CAP_NPOT_TEXTURES                    },
       { o(ARB_transform_feedback2),          PIPE_CAP_STREAM_OUTPUT_PAUSE_RESUME       },
+      { o(ARB_transform_feedback3),          PIPE_CAP_MAX_STREAM_OUTPUT_BUFFERS        },
 
       { o(EXT_blend_equation_separate),      PIPE_CAP_BLEND_EQUATION_SEPARATE          },
       { o(EXT_draw_buffers2),                PIPE_CAP_INDEP_BLEND_ENABLE               },
@@ -619,5 +620,10 @@ void st_init_extensions(struct st_context *st)
          ctx->Const.MaxSamples = i;
          break;
       }
+   }
+
+   if (ctx->Extensions.ARB_transform_feedback2 &&
+       ctx->Extensions.ARB_draw_instanced) {
+      ctx->Extensions.ARB_transform_feedback_instanced = GL_TRUE;
    }
 }
