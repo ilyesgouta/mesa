@@ -59,6 +59,22 @@ static struct llvmpipe_resource resource_list;
 #endif
 static unsigned id_counter = 0;
 
+#define DUMA_SKIP_SETUP
+#include "duma.h"
+
+static INLINE void *
+duma_align_malloc(size_t size, size_t alignment)
+{
+   void *ptr;
+   alignment = (alignment + sizeof(void*) - 1) & ~(sizeof(void*) - 1);
+   if(_duma_posix_memalign(&ptr, alignment, size) != 0)
+      return NULL;
+   return ptr;
+}
+
+#define duma_align_free(_ptr) _duma_free(_ptr)
+
+
 
 static INLINE boolean
 resource_is_texture(const struct pipe_resource *resource)
@@ -321,7 +337,7 @@ llvmpipe_resource_destroy(struct pipe_screen *pscreen,
       /* free linear image data */
       for (level = 0; level < Elements(lpr->linear); level++) {
          if (lpr->linear[level].data) {
-            align_free(lpr->linear[level].data);
+            duma_align_free(lpr->linear[level].data);
             lpr->linear[level].data = NULL;
          }
       }
@@ -329,7 +345,7 @@ llvmpipe_resource_destroy(struct pipe_screen *pscreen,
       /* free tiled image data */
       for (level = 0; level < Elements(lpr->tiled); level++) {
          if (lpr->tiled[level].data) {
-            align_free(lpr->tiled[level].data);
+            duma_align_free(lpr->tiled[level].data);
             lpr->tiled[level].data = NULL;
          }
       }
@@ -977,7 +993,7 @@ alloc_image_data(struct llvmpipe_resource *lpr, unsigned level,
    if (layout == LP_TEX_LAYOUT_TILED) {
       /* tiled data is stored in regular memory */
       uint buffer_size = tex_image_size(lpr, level, layout);
-      lpr->tiled[level].data = align_malloc(buffer_size, alignment);
+      lpr->tiled[level].data = duma_align_malloc(buffer_size, alignment);
       if (lpr->tiled[level].data) {
          memset(lpr->tiled[level].data, 0, buffer_size);
       }
@@ -998,7 +1014,7 @@ alloc_image_data(struct llvmpipe_resource *lpr, unsigned level,
       else {
          /* not a display target - allocate regular memory */
          uint buffer_size = tex_image_size(lpr, level, LP_TEX_LAYOUT_LINEAR);
-         lpr->linear[level].data = align_malloc(buffer_size, alignment);
+         lpr->linear[level].data = duma_align_malloc(buffer_size, alignment);
          if (lpr->linear[level].data) {
             memset(lpr->linear[level].data, 0, buffer_size);
          }

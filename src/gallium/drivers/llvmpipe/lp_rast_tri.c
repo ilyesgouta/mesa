@@ -346,12 +346,13 @@ lp_rast_triangle_3_16(struct lp_rasterizer_task *task,
       c = _mm_add_epi32(c, _mm_slli_epi32(dcdy, 2));
    }
 
-   for (i = 0; i < nr; i++)
+   for (i = 0; i < nr; i++) {
       lp_rast_shade_quads_mask(task,
                                &tri->inputs,
                                x + 4 * out[i].j,
                                y + 4 * out[i].i,
                                0xffff & ~out[i].mask);
+   }
 }
 
 

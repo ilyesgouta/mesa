@@ -60,6 +60,19 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info)
    if (!llvmpipe_check_render_cond(lp))
       return;
 
+#if 0
+   if (!(lp->framebuffer.cbufs[0] &&
+         lp->framebuffer.cbufs[0]->texture->target == PIPE_TEXTURE_2D &&
+         lp->framebuffer.cbufs[0]->texture->format == PIPE_FORMAT_B5G6R5_UNORM &&
+         lp->framebuffer.cbufs[0]->texture->width0 == 2048 &&
+         lp->framebuffer.cbufs[0]->texture->height0 == 2048 &&
+         lp->framebuffer.cbufs[0]->texture->depth0 == 1 &&
+         lp->framebuffer.cbufs[0]->texture->last_level == 0 &&
+         lp->framebuffer.cbufs[0]->texture->bind == 6)) {
+      return;
+   }
+#endif
+
    if (lp->dirty)
       llvmpipe_update_derived( lp );
 
