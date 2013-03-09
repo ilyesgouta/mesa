@@ -102,3 +102,12 @@ AM_CPPFLAGS += \
 	-I$(top_srcdir)/src/gallium/winsys/sw \
 	-DHAVE_NULL_BACKEND
 endif
+
+if HAVE_EGL_PLATFORM_DIRECTFB
+libegl_la_SOURCES += directfb/native_directfb.c
+AM_CPPFLAGS += \
+	-I$(top_srcdir)/src/gallium/winsys/sw \
+	-DHAVE_DIRECTFB_BACKEND
+AM_CFLAGS += \
+    $(DIRECTFB_CFLAGS)
+endif
