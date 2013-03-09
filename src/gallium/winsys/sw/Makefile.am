@@ -35,3 +35,7 @@ endif
 if HAVE_EGL_PLATFORM_WAYLAND
 SUBDIRS += wayland
 endif
+
+if HAVE_EGL_PLATFORM_DIRECTFB
+SUBDIRS += directfb
+endif
