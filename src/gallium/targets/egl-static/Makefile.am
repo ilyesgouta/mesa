@@ -90,6 +90,13 @@ egl_gallium_la_LIBADD += \
 	$(LIBDRM_LIBS)
 endif
 
+if HAVE_EGL_PLATFORM_DIRECTFB
+AM_CPPFLAGS += $(DIRECTFB_CFLAGS)
+egl_gallium_la_LIBADD += \
+    $(top_builddir)/src/gallium/winsys/sw/directfb/libws_directfb.la \
+    $(DIRECTFB_LIBS)
+endif
+
 if HAVE_EGL_PLATFORM_FBDEV
 egl_gallium_la_LIBADD += $(top_builddir)/src/gallium/winsys/sw/fbdev/libfbdev.la
 endif
