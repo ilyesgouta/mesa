@@ -104,6 +104,12 @@ typedef struct ANativeWindow        *EGLNativeWindowType;
 typedef struct egl_native_pixmap_t  *EGLNativePixmapType;
 typedef void                        *EGLNativeDisplayType;
 
+#elif defined(DIRECTFB_API)
+
+typedef void               *EGLNativeDisplayType;
+typedef IDirectFBSurface   *EGLNativePixmapType;
+typedef IDirectFBSurface   *EGLNativeWindowType;
+
 #elif defined(__unix__)
 
 #ifdef MESA_EGL_NO_X11_HEADERS
