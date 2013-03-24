@@ -1507,7 +1507,7 @@ dnl
 AC_ARG_WITH([egl-platforms],
     [AS_HELP_STRING([--with-egl-platforms@<:@=DIRS...@:>@],
         [comma delimited native platforms libEGL supports, e.g.
-        "x11,drm" @<:@default=auto@:>@])],
+        "x11,drm,directfb" @<:@default=auto@:>@])],
     [with_egl_platforms="$withval"],
     [if test "x$enable_egl" = xyes; then
 	with_egl_platforms="x11"
@@ -1554,6 +1554,10 @@ for plat in $egl_platforms; do
 	android|gdi)
 		;;
 
+	directfb)
+		PKG_CHECK_MODULES([DIRECTFB], [directfb])
+		;;
+
 	*)
 		AC_MSG_ERROR([EGL platform '$plat' does not exist])
 		;;
@@ -1580,6 +1584,7 @@ AM_CONDITIONAL(HAVE_EGL_PLATFORM_X11, echo "$egl_platforms" | grep 'x11' >/dev/n
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_WAYLAND, echo "$egl_platforms" | grep 'wayland' >/dev/null 2>&1)
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_DRM, echo "$egl_platforms" | grep 'drm' >/dev/null 2>&1)
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_FBDEV, echo "$egl_platforms" | grep 'fbdev' >/dev/null 2>&1)
+AM_CONDITIONAL(HAVE_EGL_PLATFORM_DIRECTFB, echo "$egl_platforms" | grep 'directfb' >/dev/null 2>&1)
 AM_CONDITIONAL(HAVE_EGL_PLATFORM_NULL, echo "$egl_platforms" | grep 'null' >/dev/null 2>&1)
 
 AM_CONDITIONAL(HAVE_EGL_DRIVER_DRI2, test "x$HAVE_EGL_DRIVER_DRI2" != "x")
@@ -1588,6 +1593,9 @@ AM_CONDITIONAL(HAVE_EGL_DRIVER_GLX, test "x$HAVE_EGL_DRIVER_GLX" != "x")
 AC_SUBST([EGL_NATIVE_PLATFORM])
 AC_SUBST([EGL_PLATFORMS])
 AC_SUBST([EGL_CFLAGS])
+
+AC_SUBST([DIRECTFB_CFLAGS])
+AC_SUBST([DIRECTFB_LIBS])
 
 AC_ARG_WITH([egl-driver-dir],
     [AS_HELP_STRING([--with-egl-driver-dir=DIR],
@@ -2138,6 +2146,7 @@ AC_CONFIG_FILES([Makefile
 		src/gallium/winsys/sw/wayland/Makefile
 		src/gallium/winsys/sw/wrapper/Makefile
 		src/gallium/winsys/sw/xlib/Makefile
+		src/gallium/winsys/sw/directfb/Makefile
 		src/gbm/Makefile
 		src/gbm/main/gbm.pc
 		src/glsl/Makefile
