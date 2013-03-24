@@ -26,3 +26,6 @@ AM_CPPFLAGS = \
 noinst_LTLIBRARIES = libws_directfb.la
 
 libws_directfb_la_SOURCES = directfb_sw_winsys.c
+
+libws_directfb_la_CFLAGS = \
+    $(DIRECTFB_CFLAGS)
